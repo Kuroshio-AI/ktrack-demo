@@ -62,20 +62,23 @@ function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; on
       if (update(() => result.state)) onCreated(result.inspection.id);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The tally sheet could not be opened."); }
   }
-  const field = (id: keyof typeof form, label: string, props: Record<string, unknown> = {}) => <div><label className="eyebrow" htmlFor={`tally-${id}`}>{label}</label><Input id={`tally-${id}`} className="mt-1.5" value={form[id]} onChange={set(id)} {...props} /></div>;
-  const pick = (id: keyof typeof form, label: string, options: string[]) => <div><label className="eyebrow" htmlFor={`tally-${id}`}>{label}</label><Select id={`tally-${id}`} className="mt-1.5" value={form[id]} onChange={set(id)}>{options.map((option) => <option key={option}>{option}</option>)}</Select></div>;
+  // A 12-column grid: the two pickers take half each, the job fields a quarter, and the six short fields a sixth, so no label wraps.
+  const field = (id: keyof typeof form, label: string, span: string, props: Record<string, unknown> = {}) => <div className={span}><label className="eyebrow" htmlFor={`tally-${id}`}>{label}</label><Input id={`tally-${id}`} className="mt-1.5" value={form[id]} onChange={set(id)} {...props} /></div>;
+  const pick = (id: keyof typeof form, label: string, span: string, options: string[]) => <div className={span}><label className="eyebrow" htmlFor={`tally-${id}`}>{label}</label><Select id={`tally-${id}`} className="mt-1.5" value={form[id]} onChange={set(id)}>{options.map((option) => <option key={option}>{option}</option>)}</Select></div>;
   return <div className="animate-rise mt-4 rounded-xl border border-[#e9c9ae] bg-[#fffaf5] p-4">
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <div className="sm:col-span-2"><label className="eyebrow" htmlFor="tally-format">Report format</label><Select id="tally-format" className="mt-1.5" defaultValue="f582"><option value="f582">F.582 drill pipe tally sheet → F.581 summary report</option><option disabled>Your other report formats</option></Select></div>
-      <div className="sm:col-span-2"><label className="eyebrow" htmlFor="tally-connectionId">Pipe and thread connection</label><Select id="tally-connectionId" className="mt-1.5" value={form.connectionId} onChange={set("connectionId")}>{connections.length ? connections.map((spec) => <option key={spec.id} value={spec.id}>{connectionLabel(spec)}{spec.sample ? " · sample limits" : ""}</option>) : <option value="">Import a dimension table first</option>}</Select></div>
-      {field("jobNo", "Work order")}
-      {field("customer", "Customer")}
-      {field("rig", "Rig", { placeholder: "Rig SD-09" })}
-      {field("well", "Well no.", { placeholder: "SD-09-01" })}
-      {field("location", "Location")}
-      <div className="grid grid-cols-2 gap-3">{field("joints", "Pipes", { type: "number", min: 1, max: 500 })}{pick("range", "Range", ["R1", "R2", "R3"])}</div>
-      <div className="grid grid-cols-2 gap-3">{field("nominalWall", "Nom. wall (in)", { inputMode: "decimal" })}{pick("serviceCategory", "Service cat.", ["Category 1", "Category 2", "Category 3", "Category 4", "Category 5"])}</div>
-      {field("inspector", "Inspector")}
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-12">
+      <div className="sm:col-span-2 xl:col-span-6"><label className="eyebrow" htmlFor="tally-format">Report format</label><Select id="tally-format" className="mt-1.5" defaultValue="f582"><option value="f582">F.582 drill pipe tally sheet → F.581 summary report</option><option disabled>Your other report formats</option></Select></div>
+      <div className="sm:col-span-2 xl:col-span-6"><label className="eyebrow" htmlFor="tally-connectionId">Pipe and thread connection</label><Select id="tally-connectionId" className="mt-1.5" value={form.connectionId} onChange={set("connectionId")}>{connections.length ? connections.map((spec) => <option key={spec.id} value={spec.id}>{connectionLabel(spec)}{spec.sample ? " · sample limits" : ""}</option>) : <option value="">Import a dimension table first</option>}</Select></div>
+      {field("jobNo", "Work order", "xl:col-span-3")}
+      {field("customer", "Customer", "xl:col-span-3")}
+      {field("rig", "Rig", "xl:col-span-3", { placeholder: "Rig SD-09" })}
+      {field("well", "Well no.", "xl:col-span-3", { placeholder: "SD-09-01" })}
+      {field("location", "Location", "xl:col-span-2")}
+      {field("joints", "Pipes", "xl:col-span-2", { type: "number", min: 1, max: 500 })}
+      {pick("range", "Range", "xl:col-span-2", ["R1", "R2", "R3"])}
+      {field("nominalWall", "Nom. wall (in)", "xl:col-span-2", { inputMode: "decimal" })}
+      {pick("serviceCategory", "Service cat.", "xl:col-span-2", ["Category 1", "Category 2", "Category 3", "Category 4", "Category 5"])}
+      {field("inspector", "Inspector", "xl:col-span-2")}
     </div>
     {error && <p className="mt-3 text-sm text-danger" role="alert">{error}</p>}
     <div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={onCancel}>Cancel</Button><Button className="press" onClick={create} disabled={!connections.length}><Plus data-icon="inline-start" />Open tally sheet</Button></div>
