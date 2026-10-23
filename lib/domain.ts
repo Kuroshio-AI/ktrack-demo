@@ -25,6 +25,7 @@ import type {
 import { REGISTER_HEADERS } from "./types";
 import { FLS_DUE_LEAD_DAYS, IS_FLS } from "./client";
 import { checklistFrom, type ChecklistTemplate } from "./fls-checklists";
+import { isConnectionSpec, isJoint, tallyComplete } from "./tally";
 
 export const STORAGE_KEY = "keetrack-demo-state";
 export const STORAGE_VERSION = 1 as const;
@@ -106,6 +107,7 @@ export function validateStoredState(value: unknown): value is AppState {
       && ["Draft", "Submitted", "Returned", "Approved", "Issued"].includes(inspection.status as string)
       && Array.isArray(inspection.checklist) && inspection.checklist.every((check) => Boolean(check && typeof check === "object" && isText((check as ChecklistItem).id) && isText((check as ChecklistItem).label) && ((check as ChecklistItem).section === undefined || isText((check as ChecklistItem).section)) && ["pass", "fail", "na", "pending"].includes((check as ChecklistItem).result)))
       && (inspection.title === undefined || isText(inspection.title))
+      && (inspection.connection === undefined || isConnectionSpec(inspection.connection)) && (inspection.joints === undefined || (Array.isArray(inspection.joints) && inspection.joints.every(isJoint)))
       && (!inspection.photos || (Array.isArray(inspection.photos) && inspection.photos.every((photo) => Boolean(photo && typeof photo === "object" && isText(photo.id) && isText(photo.name) && isText(photo.type) && isText(photo.dataUrl) && typeof photo.bytes === "number" && photo.bytes <= 200 * 1024))))
       && (inspection.signature === undefined || (typeof inspection.signature === "string" && inspection.signature.startsWith("data:image/png;base64,") && inspection.signature.length <= 90_000))
       && isText(inspection.notes) && isTimestamp(inspection.createdAt) && isTimestamp(inspection.updatedAt) && isOptionalDate(inspection.nextInspectionDate)
@@ -129,6 +131,7 @@ export function validateStoredState(value: unknown): value is AppState {
   const counters = candidate.savingCounters;
   return candidate.version === STORAGE_VERSION
     && (candidate.savings === undefined || (Array.isArray(candidate.savings) && candidate.savings.every(isSaving)))
+    && (candidate.connections === undefined || (Array.isArray(candidate.connections) && candidate.connections.every(isConnectionSpec)))
     && (counters === undefined || (Boolean(counters) && typeof counters === "object" && !Array.isArray(counters) && Object.values(counters).every((count) => Number.isSafeInteger(count) && count >= 0)))
     && isDateString(candidate.demoDate)
     && isRole(candidate.role)
@@ -399,7 +402,7 @@ export function createInspection(state: AppState, assetId: string, actor = state
   return { state: { ...state, inspections: [inspection, ...state.inspections] }, inspection };
 }
 
-export function updateInspection(state: AppState, id: string, patch: Partial<Pick<Inspection, "checklist" | "notes" | "photos" | "signature">>, timestamp = nowIso()): AppState {
+export function updateInspection(state: AppState, id: string, patch: Partial<Pick<Inspection, "checklist" | "joints" | "notes" | "photos" | "signature">>, timestamp = nowIso()): AppState {
   if (patch.photos && (patch.photos.some((photo) => photo.bytes > 200 * 1024) || patch.photos.reduce((total, photo) => total + photo.bytes, 0) > 1024 * 1024)) throw new Error("Evidence exceeds the local photo limit.");
   return { ...state, inspections: state.inspections.map((item) => item.id === id && (item.status === "Draft" || item.status === "Returned") ? { ...item, ...patch, updatedAt: timestamp } : item) };
 }
@@ -409,14 +412,18 @@ export function deleteInspection(state: AppState, id: string): AppState {
   return { ...state, inspections: state.inspections.filter((item) => item.id !== id || item.status !== "Draft") };
 }
 
+// A tally sheet is ready once every joint is graded; a checklist once every item is answered.
+const isComplete = (inspection: Inspection) => inspection.joints ? tallyComplete(inspection) : inspection.checklist.length > 0 && inspection.checklist.every((item) => item.result !== "pending");
+
 export function submitInspection(state: AppState, id: string, timestamp = nowIso()): AppState {
   const inspection = state.inspections.find((item) => item.id === id);
-  if (!inspection || !inspection.checklist.length || (inspection.status !== "Draft" && inspection.status !== "Returned") || !inspection.checklist.every((item) => item.result !== "pending")) return state;
+  if (!inspection || (inspection.status !== "Draft" && inspection.status !== "Returned") || !isComplete(inspection)) return state;
   const next: AppState = { ...state, inspections: state.inspections.map((item) => item.id === id ? { ...item, status: "Submitted", submittedAt: timestamp, updatedAt: timestamp } : item), alerts: state.alerts.map((alert) => alert.occurrenceKey.startsWith(`returned:${id}`) ? { ...alert, status: "resolved" as const } : alert) };
   const record = getRecord(state, inspection.assetId);
   if (!record) return next;
-  const alert: Alert = { id: makeId("alert"), occurrenceKey: `review:${id}:${timestamp}`, type: "review", event: "Inspection submitted for review", assetId: record.id, assetRef: record.assetRef, owner: record.owner, timestamp, severity: "info", status: "open" };
-  return { ...next, records: next.records.map((item) => item.id === record.id ? { ...item, activity: [activity("Inspection submitted", "Awaiting review", state.role, timestamp), ...item.activity] } : item), alerts: [alert, ...next.alerts], activity: [activity("Inspection submitted", `${record.assetRef} awaiting review`, state.role, timestamp), ...state.activity] };
+  const what = inspection.joints ? "Tally sheet" : "Inspection";
+  const alert: Alert = { id: makeId("alert"), occurrenceKey: `review:${id}:${timestamp}`, type: "review", event: `${what} submitted for review`, assetId: record.id, assetRef: record.assetRef, owner: record.owner, timestamp, severity: "info", status: "open" };
+  return { ...next, records: next.records.map((item) => item.id === record.id ? { ...item, activity: [activity(`${what} submitted`, "Awaiting review", state.role, timestamp), ...item.activity] } : item), alerts: [alert, ...next.alerts], activity: [activity(`${what} submitted`, `${record.assetRef} awaiting review`, state.role, timestamp), ...state.activity] };
 }
 
 export function returnInspection(state: AppState, id: string, comment: string, actor = state.role, timestamp = nowIso()): AppState {
@@ -429,19 +436,21 @@ export function returnInspection(state: AppState, id: string, comment: string, a
 
 export function approveInspection(state: AppState, id: string, expiryDate: string, actor = state.role, timestamp = nowIso()): AppState {
   const inspection = state.inspections.find((item) => item.id === id);
-  if (!inspection || !inspection.checklist.length || inspection.status !== "Submitted" || !isDateString(expiryDate) || expiryDate < state.demoDate || inspection.checklist.some((item) => item.result === "fail" || item.result === "pending")) return state;
+  // A tally sheet issues its report with its rejects listed on it; a checklist needs every item passed or N/A.
+  if (!inspection || !isComplete(inspection) || inspection.status !== "Submitted" || !isDateString(expiryDate) || expiryDate < state.demoDate || inspection.checklist.some((item) => item.result === "fail")) return state;
   if (inspection.certificateId) return state;
   const record = getRecord(state, inspection.assetId);
   if (!record) return state;
   const number = `CERT-${state.demoDate.replaceAll("-", "")}-${String(state.records.reduce((total, item) => total + item.certificates.length, 0) + 1).padStart(4, "0")}`;
   const certificate: Certificate = { id: makeId("cert"), number, issuedDate: state.demoDate, expiryDate, result: "Pass", status: "Valid", sourceInspectionId: id };
+  const issued = inspection.joints ? "Report issued" : "Certificate issued";
   const nextInspectionDate = record.inspectionIntervalMonths ? addMonthsClamped(state.demoDate, record.inspectionIntervalMonths) : undefined;
   const next: AppState = {
     ...state,
     inspections: state.inspections.map((item) => item.id === id ? { ...item, status: "Issued", certificateId: certificate.id, nextInspectionDate, reviewedAt: timestamp, updatedAt: timestamp } : item),
-    records: state.records.map((item) => item.id === record.id ? { ...item, inspectionDueDate: nextInspectionDate, certificates: [...item.certificates.map((cert) => (cert.status === "Valid" || cert.status === "Expired") ? { ...cert, status: "Superseded" as const } : cert), certificate], certificateNo: certificate.number, certificateIssuedDate: certificate.issuedDate, certificateExpiryDate: certificate.expiryDate, activity: [activity("Certificate issued", certificate.number, actor, timestamp), ...item.activity], updatedAt: timestamp } : item),
-    alerts: [certificateAlert(record, certificate, "Certificate issued", timestamp), ...record.certificates.filter((cert) => cert.status === "Valid" || cert.status === "Expired").map((cert) => certificateAlert(record, { ...cert, status: "Superseded" }, "Certificate superseded", timestamp)), ...state.alerts.map((alert): Alert => alert.occurrenceKey.startsWith(`review:${id}`) || alert.occurrenceKey.startsWith(`returned:${id}`) ? { ...alert, status: "resolved" } : alert)],
-    activity: [activity("Certificate issued", `${record.assetRef} · ${certificate.number}`, actor, timestamp), ...state.activity],
+    records: state.records.map((item) => item.id === record.id ? { ...item, inspectionDueDate: nextInspectionDate, certificates: [...item.certificates.map((cert) => (cert.status === "Valid" || cert.status === "Expired") ? { ...cert, status: "Superseded" as const } : cert), certificate], certificateNo: certificate.number, certificateIssuedDate: certificate.issuedDate, certificateExpiryDate: certificate.expiryDate, activity: [activity(issued, certificate.number, actor, timestamp), ...item.activity], updatedAt: timestamp } : item),
+    alerts: [certificateAlert(record, certificate, issued, timestamp), ...record.certificates.filter((cert) => cert.status === "Valid" || cert.status === "Expired").map((cert) => certificateAlert(record, { ...cert, status: "Superseded" }, "Certificate superseded", timestamp)), ...state.alerts.map((alert): Alert => alert.occurrenceKey.startsWith(`review:${id}`) || alert.occurrenceKey.startsWith(`returned:${id}`) ? { ...alert, status: "resolved" } : alert)],
+    activity: [activity(issued, `${record.assetRef} · ${certificate.number}`, actor, timestamp), ...state.activity],
   };
   return recalculateAlerts(next, timestamp);
 }

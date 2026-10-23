@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createInitialState, recalculateAlerts, setDemoDate as setDate, setRole as setCurrentRole, todayString } from "@/lib/domain";
-import { commitState, loadState } from "@/lib/storage";
+import { commitState, freshState, loadState } from "@/lib/storage";
 import type { AppState, Role } from "@/lib/types";
 
 type AppContextValue = {
@@ -64,7 +64,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true;
     } catch { setSaveError("Browser storage is unavailable. Previous data is intact."); return false; }
   }, []);
-  const clearOperationalData = useCallback(() => restore(createInitialState(todayString())), [restore]);
+  const clearOperationalData = useCallback(() => restore(freshState(todayString())), [restore]);
 
   const value = useMemo(() => ({ state, hydrated, storageWarning, saveError, update, setRole, setDemoDate, clearOperationalData, restore }), [state, hydrated, storageWarning, saveError, update, setRole, setDemoDate, clearOperationalData, restore]);
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

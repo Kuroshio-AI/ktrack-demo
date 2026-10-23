@@ -127,6 +127,27 @@ export type InspectionPhoto = {
   bytes: number;
 };
 
+// AMS only: one row of a dimension table, the acceptance limits for one size, weight, connection and grade. All values in inches.
+export type Limit = { column: string; min?: number; max?: number };
+export type ConnectionSpec = {
+  id: string;
+  size: string;
+  weight: string;
+  connection: string;
+  grade: string;
+  limits: Limit[];
+  // Made-up rows that ship with the public demo; the client's own table is imported.
+  sample?: boolean;
+};
+
+// AMS only: one line of a tally sheet. A value is keyed by its limit's column; a missing key is not measured yet.
+export type Joint = {
+  no: number;
+  serial?: string;
+  values: Record<string, number>;
+  visual: "pass" | "fail" | "pending";
+};
+
 export type Inspection = {
   id: string;
   assetId: string;
@@ -134,6 +155,9 @@ export type Inspection = {
   // FLS only: which system's PPM checklist this is, such as "Fire alarm system".
   title?: string;
   checklist: ChecklistItem[];
+  // AMS only: a tally sheet keeps its own copy of the connection's limits, so a later import never regrades an issued report.
+  connection?: ConnectionSpec;
+  joints?: Joint[];
   photos?: InspectionPhoto[];
   // PNG drawn on the phone hand-off page; shown on the certificate's "Inspected by" line.
   signature?: string;
@@ -187,6 +211,8 @@ export type AppState = {
   savings?: Saving[];
   // Last saving number issued per year, so a removed saving's certificate number is never handed out again.
   savingCounters?: Record<string, number>;
+  // AMS only: the dimension table that new tally sheets are checked against.
+  connections?: ConnectionSpec[];
 };
 
 export type ImportError = {
