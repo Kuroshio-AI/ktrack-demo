@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { addDays, addMonthsClamped, approveInspection, createInitialState, makeId, nowIso, recalculateAlerts, rowToRecord, submitInspection, todayString, trimValue } from "./domain";
+import { addDays, addMonthsClamped, approveInspection, createInitialState, isDateString, makeId, nowIso, recalculateAlerts, rowToRecord, submitInspection, todayString, trimValue } from "./domain";
 import { connectionLabel, limitFor, TALLY_COLUMNS, type TallyColumn } from "./tally";
 import type { Activity, AppState, ConnectionSpec, Equipment, ImportError, Inspection, Joint, Limit, Role, TallyJob } from "./types";
 
@@ -133,6 +133,15 @@ export function createTally(state: AppState, input: TallyInput, actor = state.ro
 
 // The F.581 equipment details, one of each. Made-up models and serials; the lead gauge falls due first, so moving the
 // demo date a fortnight on shows a tally sheet blocked by an expired calibration.
+// Adds an instrument to the register. Serials are unique because the report identifies each instrument by its serial.
+export function addEquipment(state: AppState, input: Omit<Equipment, "id">): { state: AppState; item: Equipment } {
+  const item: Equipment = { id: makeId("equipment"), kind: input.kind.trim(), model: input.model.trim(), serial: input.serial.trim(), calibrationDue: input.calibrationDue };
+  if (!item.kind || !item.model || !item.serial) throw new Error("Enter the instrument, its model and its serial number.");
+  if (!isDateString(item.calibrationDue)) throw new Error("Enter the calibration due date.");
+  if ((state.equipment ?? []).some((other) => other.serial.toLowerCase() === item.serial.toLowerCase())) throw new Error(`An instrument with serial ${item.serial} is already listed.`);
+  return { state: { ...state, equipment: [...(state.equipment ?? []), item] }, item };
+}
+
 export function sampleEquipment(demoDate: string): Equipment[] {
   return ([["EMI console", "EMI-500", 142], ["EMI coil", "EC-5", 142], ["Mag. coil", "MC-12", 88], ["UT gauge", "UTG-38", 61], ["AC yoke", "AY-230", 205], ["UT flaw detector", "UFD-650", 119], ["UV meter", "UVM-25", 34], ["Lead gauge", "LG-4", 12], ["Profile gauge", "PG-6", 176]] as const)
     .map(([kind, model, days], index) => ({ id: `eq-${index + 1}`, kind, model, serial: `AMS-${model.split("-")[0]}-${String(141 + index * 37).padStart(4, "0")}`, calibrationDue: addDays(demoDate, days) }));

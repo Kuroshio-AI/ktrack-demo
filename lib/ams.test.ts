@@ -112,6 +112,17 @@ test("a tally sheet can't be submitted while one of its instruments is out of ca
   assert.deepEqual([alert?.assetRef, alert?.tier], ["Lead gauge 7", "overdue"]);
 });
 
+test("an added instrument joins the register and new tally sheets, and its serial must be new", () => {
+  const base = { ...ams.createInitialState("2026-10-23"), connections: [spec], equipment: [] };
+  const { state, item } = ams.addEquipment(base, { kind: " Thread gauge ", model: "TG-2", serial: "TG-0042", calibrationDue: "2026-11-10" });
+  assert.deepEqual([item.kind, state.equipment?.length], ["Thread gauge", 1]);
+  assert.deepEqual(ams.createTally(state, tallyInput).inspection.job?.equipmentIds, [item.id]);
+  assert.ok(ams.recalculateAlerts(state).alerts.some((alert) => alert.event === "Calibration due" && alert.assetRef === "Thread gauge TG-0042"), "due within 30 days");
+  assert.throws(() => ams.addEquipment(state, { kind: "Thread gauge", model: "TG-2", serial: "tg-0042", calibrationDue: "2027-01-01" }), /already listed/);
+  assert.throws(() => ams.addEquipment(state, { kind: "Thread gauge", model: "", serial: "TG-7", calibrationDue: "2027-01-01" }), /model/);
+  assert.throws(() => ams.addEquipment(state, { kind: "Thread gauge", model: "TG-2", serial: "TG-7", calibrationDue: "" }), /due date/);
+});
+
 test("a new browser opens on the sample jobs, and that workspace survives a save and reload", () => {
   const state = ams.amsInitialState("2026-10-23");
   assert.ok(ams.validateStoredState(JSON.parse(JSON.stringify(state))));
