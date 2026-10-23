@@ -140,12 +140,39 @@ export type ConnectionSpec = {
   sample?: boolean;
 };
 
-// AMS only: one line of a tally sheet. A value is keyed by its limit's column; a missing key is not measured yet.
+// AMS only: one line of the F.582 drill pipe tally sheet, one pipe. Numbers are keyed by tally column, in inches
+// (length in feet); condition codes are keyed the same way, and a missing code means OK.
+export type FinalClass = "Class 1 (New)" | "Class 1-Rework" | "Premium-Accepted" | "Premium-Rework" | "Class-2" | "Bent" | "Scrap";
 export type Joint = {
   no: number;
   serial?: string;
   values: Record<string, number>;
-  visual: "pass" | "fail" | "pending";
+  codes: Record<string, string>;
+  // ID coating condition 1 to 4, from the form's reference scale.
+  coating?: number;
+  // The inspector's call; unset takes KTrack's suggestion.
+  finalClass?: FinalClass;
+};
+
+// AMS only: an inspection instrument from the F.581 equipment details.
+export type Equipment = { id: string; kind: string; model: string; serial: string; calibrationDue: string };
+
+// AMS only: the F.581 and F.582 header fields that aren't on the job record (customer, rig and work order are).
+export type TallyJob = {
+  well: string;
+  location: string;
+  range: string;
+  nominalWall: number;
+  standard: string;
+  serviceCategory: string;
+  toolJointOd?: string;
+  pinId?: string;
+  hardBand?: string;
+  program: string[];
+  services: string[];
+  equipmentIds: string[];
+  // Copied on submission, so an issued report keeps the calibration dates it was checked against.
+  equipment?: Equipment[];
 };
 
 export type Inspection = {
@@ -157,6 +184,7 @@ export type Inspection = {
   checklist: ChecklistItem[];
   // AMS only: a tally sheet keeps its own copy of the connection's limits, so a later import never regrades an issued report.
   connection?: ConnectionSpec;
+  job?: TallyJob;
   joints?: Joint[];
   photos?: InspectionPhoto[];
   // PNG drawn on the phone hand-off page; shown on the certificate's "Inspected by" line.
@@ -213,6 +241,8 @@ export type AppState = {
   savingCounters?: Record<string, number>;
   // AMS only: the dimension table that new tally sheets are checked against.
   connections?: ConnectionSpec[];
+  // AMS only: the inspection instruments and their calibration due dates.
+  equipment?: Equipment[];
 };
 
 export type ImportError = {

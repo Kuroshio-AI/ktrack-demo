@@ -25,7 +25,7 @@ import type {
 import { REGISTER_HEADERS } from "./types";
 import { FLS_DUE_LEAD_DAYS, IS_FLS } from "./client";
 import { checklistFrom, type ChecklistTemplate } from "./fls-checklists";
-import { isConnectionSpec, isJoint, tallyComplete } from "./tally";
+import { expiredEquipment, isConnectionSpec, isEquipment, isJoint, isTallyJob, tallyComplete } from "./tally";
 
 export const STORAGE_KEY = "keetrack-demo-state";
 export const STORAGE_VERSION = 1 as const;
@@ -107,7 +107,7 @@ export function validateStoredState(value: unknown): value is AppState {
       && ["Draft", "Submitted", "Returned", "Approved", "Issued"].includes(inspection.status as string)
       && Array.isArray(inspection.checklist) && inspection.checklist.every((check) => Boolean(check && typeof check === "object" && isText((check as ChecklistItem).id) && isText((check as ChecklistItem).label) && ((check as ChecklistItem).section === undefined || isText((check as ChecklistItem).section)) && ["pass", "fail", "na", "pending"].includes((check as ChecklistItem).result)))
       && (inspection.title === undefined || isText(inspection.title))
-      && (inspection.connection === undefined || isConnectionSpec(inspection.connection)) && (inspection.joints === undefined || (Array.isArray(inspection.joints) && inspection.joints.every(isJoint)))
+      && (inspection.connection === undefined || isConnectionSpec(inspection.connection)) && (inspection.job === undefined || isTallyJob(inspection.job)) && (inspection.joints === undefined || (Array.isArray(inspection.joints) && inspection.joints.every(isJoint)))
       && (!inspection.photos || (Array.isArray(inspection.photos) && inspection.photos.every((photo) => Boolean(photo && typeof photo === "object" && isText(photo.id) && isText(photo.name) && isText(photo.type) && isText(photo.dataUrl) && typeof photo.bytes === "number" && photo.bytes <= 200 * 1024))))
       && (inspection.signature === undefined || (typeof inspection.signature === "string" && inspection.signature.startsWith("data:image/png;base64,") && inspection.signature.length <= 90_000))
       && isText(inspection.notes) && isTimestamp(inspection.createdAt) && isTimestamp(inspection.updatedAt) && isOptionalDate(inspection.nextInspectionDate)
@@ -132,6 +132,7 @@ export function validateStoredState(value: unknown): value is AppState {
   return candidate.version === STORAGE_VERSION
     && (candidate.savings === undefined || (Array.isArray(candidate.savings) && candidate.savings.every(isSaving)))
     && (candidate.connections === undefined || (Array.isArray(candidate.connections) && candidate.connections.every(isConnectionSpec)))
+    && (candidate.equipment === undefined || (Array.isArray(candidate.equipment) && candidate.equipment.every(isEquipment)))
     && (counters === undefined || (Boolean(counters) && typeof counters === "object" && !Array.isArray(counters) && Object.values(counters).every((count) => Number.isSafeInteger(count) && count >= 0)))
     && isDateString(candidate.demoDate)
     && isRole(candidate.role)
@@ -342,6 +343,17 @@ export function recalculateAlerts(state: AppState, timestamp = nowIso()): AppSta
       next.push({ id: makeId("alert"), occurrenceKey, type: "deadline", event: deadline.event, assetId: record.id, assetRef: record.assetRef, owner: record.owner, dueDate: deadline.date, timestamp, severity: tier === "overdue" ? "critical" : deadline.severity, tier, status: "open" });
     }
   }
+  // AMS: an instrument's calibration due date alerts like any other deadline.
+  for (const item of state.equipment ?? []) {
+    const tier = deadlineTier(dateDiffDays(item.calibrationDue, state.demoDate));
+    if (!tier) continue;
+    const occurrenceKey = `${item.id}:calibration:${item.calibrationDue}`;
+    currentKeys.add(occurrenceKey);
+    const assetRef = `${item.kind} ${item.serial}`;
+    if (next.some((alert) => alert.occurrenceKey === occurrenceKey && alert.tier === tier && alert.status === "open")) continue;
+    next.forEach((alert) => { if (alert.occurrenceKey === occurrenceKey && alert.status === "open") alert.status = "resolved"; });
+    next.push({ id: makeId("alert"), occurrenceKey, type: "deadline", event: "Calibration due", assetRef, owner: item.model, dueDate: item.calibrationDue, timestamp, severity: tier === "overdue" ? "critical" : "warning", tier, status: "open" });
+  }
   next.forEach((alert) => {
     if (alert.type === "deadline" && alert.status === "open" && !currentKeys.has(alert.occurrenceKey)) alert.status = "resolved";
   });
@@ -402,7 +414,7 @@ export function createInspection(state: AppState, assetId: string, actor = state
   return { state: { ...state, inspections: [inspection, ...state.inspections] }, inspection };
 }
 
-export function updateInspection(state: AppState, id: string, patch: Partial<Pick<Inspection, "checklist" | "joints" | "notes" | "photos" | "signature">>, timestamp = nowIso()): AppState {
+export function updateInspection(state: AppState, id: string, patch: Partial<Pick<Inspection, "checklist" | "job" | "joints" | "notes" | "photos" | "signature">>, timestamp = nowIso()): AppState {
   if (patch.photos && (patch.photos.some((photo) => photo.bytes > 200 * 1024) || patch.photos.reduce((total, photo) => total + photo.bytes, 0) > 1024 * 1024)) throw new Error("Evidence exceeds the local photo limit.");
   return { ...state, inspections: state.inspections.map((item) => item.id === id && (item.status === "Draft" || item.status === "Returned") ? { ...item, ...patch, updatedAt: timestamp } : item) };
 }
@@ -418,7 +430,10 @@ const isComplete = (inspection: Inspection) => inspection.joints ? tallyComplete
 export function submitInspection(state: AppState, id: string, timestamp = nowIso()): AppState {
   const inspection = state.inspections.find((item) => item.id === id);
   if (!inspection || (inspection.status !== "Draft" && inspection.status !== "Returned") || !isComplete(inspection)) return state;
-  const next: AppState = { ...state, inspections: state.inspections.map((item) => item.id === id ? { ...item, status: "Submitted", submittedAt: timestamp, updatedAt: timestamp } : item), alerts: state.alerts.map((alert) => alert.occurrenceKey.startsWith(`returned:${id}`) ? { ...alert, status: "resolved" as const } : alert) };
+  // A tally sheet needs every instrument it lists in calibration, and keeps a copy of them for its report.
+  const job = inspection.job && { ...inspection.job, equipment: (state.equipment ?? []).filter((item) => inspection.job!.equipmentIds.includes(item.id)) };
+  if (job && expiredEquipment(job.equipment, job.equipmentIds, state.demoDate).length) return state;
+  const next: AppState = { ...state, inspections: state.inspections.map((item) => item.id === id ? { ...item, ...(job && { job }), status: "Submitted", submittedAt: timestamp, updatedAt: timestamp } : item), alerts: state.alerts.map((alert) => alert.occurrenceKey.startsWith(`returned:${id}`) ? { ...alert, status: "resolved" as const } : alert) };
   const record = getRecord(state, inspection.assetId);
   if (!record) return next;
   const what = inspection.joints ? "Tally sheet" : "Inspection";

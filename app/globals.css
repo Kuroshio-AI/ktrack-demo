@@ -41,11 +41,32 @@ a { color: inherit; text-decoration: none; }
 }
 @media print {
   .print-hidden { display: none !important; }
-  body { background: white; }
-  body:has(.certificate-print-area[open]) > *:not(.certificate-print-area) { display: none !important; }
+  html, body { background: white; }
+  body:has(.certificate-print-area[open]) > *:not(.certificate-print-area, .tally-print-copy) { display: none !important; }
+  .certificate-print-area[open]:has(+ .tally-print-copy) { display: none !important; }
   .certificate-print-area[open] { position: static; width: 100%; max-width: none; max-height: none; margin: 0; padding: 0; overflow: visible; border: 0; }
   .certificate-print-area::backdrop { display: none; }
   @page { size: A4; margin: 12mm; }
+}
+
+/* AMS: the client's paper forms band their headings in peach and their limits row in green; the screens and reports keep
+   those colours so an inspector finds the same thing in the same place. Readings use Plex Mono so the inches line up. */
+:root { --ease-out-strong: cubic-bezier(.23, 1, .32, 1); }
+.tally-print-copy { display: none; }
+@media print { .tally-print-copy { display: block; } }
+.tally-mono { font-family: var(--font-plex-mono), ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.form-band { background: #fbe3cf; color: #6b3410; }
+.form-limits { background: #e4f2d7; color: #2d6214; }
+/* Press feedback only: typing and keyboard moves in the tally never animate. */
+.press { transition: transform 140ms var(--ease-out-strong); }
+.press:active:not(:disabled) { transform: scale(.97); }
+@media print {
+  /* The tally prints as its own landscape page after the A4 summary, like the paper F.582. */
+  @page tally { size: A4 landscape; margin: 8mm; }
+  /* F.581 is one A4 page on paper: narrower margins and 80% scale keep a full report (seven down-graded pipes, nine instruments) on it. */
+  @page f581 { size: A4; margin: 8mm; }
+  .f581-page { page: f581; zoom: 0.8; }
+  .tally-page { page: tally; break-before: page; }
 }
 
 /* A row just saved glows once where it landed, then settles. */

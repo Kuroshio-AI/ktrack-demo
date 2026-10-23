@@ -98,9 +98,9 @@ export function CertificatesView() {
       <CardContent>{certificates.length ? <div className="grid gap-4 xl:grid-cols-2">{certificates.map(({ record, certificate }) => {
         const details = snapshot(record, certificate, state.demoDate);
         const tally = state.inspections.find((item) => item.id === certificate.sourceInspectionId && item.joints);
-        const counts = tally && summarizeTally(tally.connection!, tally.joints!);
+        const counts = tally?.job && summarizeTally(tally.connection!, tally.job, tally.joints!);
         return <div key={certificate.id} className="min-w-0 rounded-xl border border-line bg-white p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow">{record.assetRef} · {counts ? `${record.owner} · ` : ""}{record.site}</div><h3 className="mt-1 break-all text-lg font-bold text-navy">{certificate.number}</h3><p className="mt-1 text-sm text-slate-500">{record.assetType}{counts && ` · ${counts.total} joints, ${counts.premium} Premium, ${counts.reject} Reject`}</p></div><Badge variant={details.status === "Valid" ? "success" : details.status === "Expired" ? "warning" : "danger"}>{details.status}</Badge></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow">{record.assetRef} · {counts ? `${record.owner} · ` : ""}{record.site}</div><h3 className="mt-1 break-all text-lg font-bold text-navy">{certificate.number}</h3><p className="mt-1 text-sm text-slate-500">{record.assetType}{counts && ` · ${counts.total} pipes, ${counts.accepted} accepted, ${counts.downgraded.length} not accepted`}</p></div><Badge variant={details.status === "Valid" ? "success" : details.status === "Expired" ? "warning" : "danger"}>{details.status}</Badge></div>
           <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-paper p-3 text-sm"><div><div className="eyebrow">Issued</div><div className="mt-1 font-semibold text-navy">{formatDate(certificate.issuedDate)}</div></div><div><div className="eyebrow">Expires</div><div className="mt-1 font-semibold text-navy">{formatDate(certificate.expiryDate)}</div></div></div>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void print(record, certificate)}><Printer />Print</Button>

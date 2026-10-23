@@ -9,3 +9,4 @@ uploads/
 tmp/
 test-results/
 playwright-report/
+contextforclient/

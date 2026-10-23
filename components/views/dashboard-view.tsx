@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowUpRight, BellOff, Building2, CalendarClock, CircleAlert, ClipboardCheck, ClipboardList, FileClock, ShieldAlert, ShieldCheck, ShieldX } from "lucide-react";
+import { ArrowUpRight, BellOff, Building2, CalendarClock, CircleAlert, ClipboardCheck, ClipboardList, FileClock, Gauge, ShieldAlert, ShieldCheck } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { RollingNumber } from "@/components/interior/value-flash";
 import { DigestCard } from "@/components/fls-panels";
@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { IS_AMS, IS_FLS } from "@/lib/client";
 import { dateDiffDays } from "@/lib/domain";
 import { buildingStatus, type Light } from "@/lib/fls";
-import { summarizeTally } from "@/lib/tally";
+import { calibrationStatus } from "@/lib/tally";
 import { formatDate, formatDateTime, formatLocalDate } from "@/lib/utils";
 
 function Kpi({ label, value, detail, icon: Icon, tone = "navy" }: { label: string; value: number; detail: string; icon: typeof CalendarClock; tone?: "navy" | "amber" | "red" | "green" }) {
@@ -26,13 +26,12 @@ function FlsKpis() {
   return <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-5"><Kpi label="Buildings" value={state.records.length} detail="tracked" icon={Building2} /><Kpi label="Green" value={count("green")} detail="15+ days to due date" icon={ShieldCheck} tone="green" /><Kpi label="Amber" value={count("amber")} detail="due within 14 days" icon={CalendarClock} tone="amber" /><Kpi label="Red" value={count("red")} detail="due date passed or expired" icon={ShieldAlert} tone="red" /><Kpi label="Muted" value={statuses.filter((status) => status.muted).length} detail="no alerts sent" icon={BellOff} /></div>;
 }
 
-// Where the inspection work stands: sheets still being measured, waiting for a reviewer, issued, and what was rejected.
+// Where the inspection work stands: sheets still being measured, waiting for a reviewer, issued, and instruments to calibrate.
 function AmsKpis() {
   const { state } = useApp();
-  const tallies = state.inspections.filter((inspection) => inspection.joints && inspection.connection);
-  const issued = tallies.filter((inspection) => inspection.status === "Issued");
-  const rejected = issued.reduce((total, inspection) => total + summarizeTally(inspection.connection!, inspection.joints!).reject, 0);
-  return <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Kpi label="Tally sheets open" value={tallies.filter((inspection) => inspection.status === "Draft" || inspection.status === "Returned").length} detail="being measured" icon={ClipboardList} /><Kpi label="Waiting for approval" value={tallies.filter((inspection) => inspection.status === "Submitted").length} detail="in Approvals" icon={FileClock} tone="amber" /><Kpi label="Reports issued" value={issued.length} detail="numbered, with QR" icon={ShieldCheck} tone="green" /><Kpi label="Joints rejected" value={rejected} detail="on issued reports" icon={ShieldX} tone="red" /></div>;
+  const tallies = state.inspections.filter((inspection) => inspection.joints && inspection.job);
+  const calibration = (state.equipment ?? []).filter((item) => calibrationStatus(item, state.demoDate) !== "Valid").length;
+  return <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Kpi label="Tally sheets open" value={tallies.filter((inspection) => inspection.status === "Draft" || inspection.status === "Returned").length} detail="being measured" icon={ClipboardList} /><Kpi label="Waiting for approval" value={tallies.filter((inspection) => inspection.status === "Submitted").length} detail="in Approvals" icon={FileClock} tone="amber" /><Kpi label="Reports issued" value={tallies.filter((inspection) => inspection.status === "Issued").length} detail="numbered, with QR" icon={ShieldCheck} tone="green" /><Kpi label="Calibrations due" value={calibration} detail="expired or within 30 days" icon={Gauge} tone="red" /></div>;
 }
 
 export function DashboardView() {
