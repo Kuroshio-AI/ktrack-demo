@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { motion, MotionConfig } from "motion/react";
 import { RollingNumber } from "@/components/interior/value-flash";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, Building2, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Import, Leaf, Menu, Settings2, ShieldCheck, X } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, Building2, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Import, Leaf, Menu, Ruler, Settings2, ShieldCheck, X } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,9 @@ import { SustainabilityView } from "@/components/views/sustainability-view";
 import { AlertsView } from "@/components/views/alerts-view";
 import { DemoControlsView } from "@/components/views/demo-controls-view";
 import { BuildingsView } from "@/components/views/buildings-view";
-import { IS_FLS } from "@/lib/client";
+import { ConnectionsView } from "@/components/views/connections-view";
+import { TallyView } from "@/components/views/tally-view";
+import { AMS_NAME, IS_AMS, IS_FLS } from "@/lib/client";
 import type { Role } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -32,6 +34,7 @@ const nav = [
   { id: "inspections", label: "Inspections", icon: CalendarCheck },
   { id: "approvals", label: "Approvals", icon: BookOpenCheck },
   { id: "certificates", label: "Certificates", icon: ShieldCheck },
+  { id: "connections", label: "Connections", icon: Ruler },
   { id: "warranties", label: "Warranties", icon: FileBadge },
   { id: "sustainability", label: "Sustainability", icon: Leaf },
   { id: "alerts", label: "Alerts", icon: BellRing },
@@ -42,7 +45,12 @@ const nav = [
 // The FLS build keeps what a certificate tracker needs plus the service provider's PPM checklists; Register becomes its Buildings table under the same URL.
 const FLS_VIEWS: string[] = ["dashboard", "register", "inspections", "approvals", "alerts", "import", "demo-controls"];
 const FLS_LABELS: Record<string, { label: string; icon?: typeof Building2 }> = { register: { label: "Buildings", icon: Building2 }, inspections: { label: "PPM checklists" } };
-const shownNav = IS_FLS ? nav.filter(({ id }) => FLS_VIEWS.includes(id)).map((item) => ({ ...item, ...FLS_LABELS[item.id] })) : nav;
+// The AMS build: tally sheets checked against the dimension table, approved into numbered reports. No register, warranties or import page.
+const AMS_VIEWS: string[] = ["dashboard", "inspections", "approvals", "certificates", "connections", "alerts", "sustainability", "demo-controls"];
+const AMS_LABELS: Record<string, { label: string; icon?: typeof Building2 }> = { inspections: { label: "Tally sheets", icon: ClipboardList }, certificates: { label: "Reports", icon: FileCheck2 } };
+const shownNav = IS_FLS ? nav.filter(({ id }) => FLS_VIEWS.includes(id)).map((item) => ({ ...item, ...FLS_LABELS[item.id] }))
+  : IS_AMS ? nav.filter(({ id }) => AMS_VIEWS.includes(id)).map((item) => ({ ...item, ...AMS_LABELS[item.id] }))
+  : nav.filter(({ id }) => id !== "connections");
 
 const titles: Record<string, { eyebrow: string; title: string; description: string }> = {
   import: { eyebrow: "Data intake", title: "Import", description: "Validate a register or sustainability savings spreadsheet and review the rows before importing." },
@@ -67,12 +75,25 @@ const flsTitles: typeof titles = {
   "demo-controls": { eyebrow: "Scenario lab", title: "Demo Controls", description: "Move the demo date, back up this workspace and check the WhatsApp setup." },
 };
 
+const amsTitles: typeof titles = {
+  dashboard: { eyebrow: "Inspection overview", title: "Dashboard", description: "Tally sheets in progress, reports waiting for approval and what was issued." },
+  inspections: { eyebrow: "Drill string inspection", title: "Tally sheets", description: "Enter each joint's readings. KTrack checks every value against the connection's dimension table as you type, and the summary report builds itself." },
+  approvals: { eyebrow: "Quality gate", title: "Approvals", description: "Check a submitted tally sheet's summary and approve it into a numbered report, or return it to the inspector with a correction." },
+  certificates: { eyebrow: "Issued reports", title: "Reports", description: "Every approved inspection report, with its number and a QR code your customer can scan to check it is current." },
+  connections: { eyebrow: "Acceptance criteria", title: "Connections", description: "The dimension table: the limits for each size, weight, connection and grade. Tally sheets are checked against it." },
+  alerts: { eyebrow: "Attention queue", title: "Alerts", description: "Reports waiting for review, tally sheets returned for correction, and reports nearing their expiry." },
+  sustainability: titles.sustainability,
+  "demo-controls": { eyebrow: "Scenario lab", title: "Demo Controls", description: "Move the demo date, back up this workspace or reset it to the sample jobs." },
+};
+
 function View({ view }: { view: string }): ReactNode {
   if (IS_FLS && !FLS_VIEWS.includes(view)) return <DashboardView />;
+  if (IS_AMS && !AMS_VIEWS.includes(view)) return <DashboardView />;
   switch (view) {
     case "dashboard": return <DashboardView />;
     case "register": return IS_FLS ? <BuildingsView /> : <RegisterView />;
-    case "inspections": return <InspectionsView />;
+    case "inspections": return IS_AMS ? <TallyView /> : <InspectionsView />;
+    case "connections": return IS_AMS ? <ConnectionsView /> : <DashboardView />;
     case "approvals": return <ApprovalsView />;
     case "certificates": return <CertificatesView />;
     case "warranties": return <WarrantiesView />;
@@ -110,7 +131,7 @@ function AppFrame({ initialView }: { initialView: string }) {
     document.addEventListener("keydown", onKey); firstNavLink.current?.focus();
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = previousOverflow; menuButton.current?.focus(); };
   }, [mobileOpen, isMobile]);
-  const meta = (IS_FLS ? flsTitles : titles)[view] ?? titles.dashboard;
+  const meta = (IS_FLS ? flsTitles : IS_AMS ? amsTitles : titles)[view] ?? titles.dashboard;
   const openAlerts = state.alerts.filter((alert) => alert.status === "open").length;
 
   return <div className="app-grid min-h-screen lg:flex">
@@ -118,7 +139,7 @@ function AppFrame({ initialView }: { initialView: string }) {
       <div className="flex items-center justify-between px-2">
         <Link href="/dashboard" onClick={() => setMobileOpen(false)} className="flex items-center gap-3 focus-ring rounded-md">
           <span className="grid size-10 place-items-center rounded-xl bg-white text-[#0b3151] shadow-lg"><span className="text-xl font-black">K</span></span>
-          <span><span className="block text-[19px] font-bold tracking-[-.03em]">KTrack</span><span className="block text-[10px] font-bold uppercase tracking-[.15em] text-[#a8c7dd]">{IS_FLS ? "DXB FLS compliance" : "Kee Safety operations"}</span></span>
+          <span><span className="block text-[19px] font-bold tracking-[-.03em]">KTrack</span><span className="block text-[10px] font-bold uppercase tracking-[.15em] text-[#a8c7dd]">{IS_FLS ? "DXB FLS compliance" : IS_AMS ? AMS_NAME : "Kee Safety operations"}</span></span>
         </Link>
         <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 lg:hidden" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X /></Button>
       </div>
@@ -130,7 +151,7 @@ function AppFrame({ initialView }: { initialView: string }) {
         <span className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[.16em] text-[#80a9c2]">Sandbox</span>
         <Link href="/demo-controls" onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${view === "demo-controls" ? "text-[#0b3151]" : "text-[#d1e3ed] hover:bg-white/10 hover:text-white"}`}>{view === "demo-controls" && <NavPill />}<Settings2 className="relative size-[17px] transition-transform group-hover:rotate-45" /><span className="relative">Demo Controls</span></Link>
       </nav>
-      <div className="border-t border-[#2a5774] px-2 pt-4 text-[11px] leading-relaxed text-[#9cbed2]"><div className="flex items-center gap-2"><Activity className="size-3" />Manual notifications only</div><div className="mt-1">v1.0 · {IS_FLS ? "demo workspace" : "fictional demo data"}</div></div>
+      <div className="border-t border-[#2a5774] px-2 pt-4 text-[11px] leading-relaxed text-[#9cbed2]"><div className="flex items-center gap-2"><Activity className="size-3" />Manual notifications only</div><div className="mt-1">v1.0 · {IS_FLS || IS_AMS ? "demo workspace" : "fictional demo data"}</div></div>
     </aside>
     {mobileOpen && <button className="fixed inset-0 z-30 bg-[#071d30]/50 lg:hidden" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <main inert={isMobile && mobileOpen ? true : undefined} className="min-w-0 flex-1">

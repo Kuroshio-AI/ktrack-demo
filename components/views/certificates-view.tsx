@@ -7,9 +7,12 @@ import { useApp } from "@/components/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TallyReportDialog } from "@/components/tally-report";
 import { Signature, WarrantyDocument, type WarrantyPrint } from "@/components/warranty-document";
+import { IS_AMS } from "@/lib/client";
 import { effectiveCertificateStatus, revokeCertificate } from "@/lib/domain";
 import { qrFor, warrantyPrint } from "@/lib/qr";
+import { summarizeTally } from "@/lib/tally";
 import type { AssetRecord, Certificate } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -31,6 +34,8 @@ export function CertificatesView() {
   useEffect(() => { if (printing) dialog.current?.showModal(); }, [printing]);
   // The QR opens in a dialog so a card with a QR stays the same size as its neighbours.
   const [qrOpen, setQrOpen] = useState<string>();
+  // AMS prints the tally sheet's summary report, with the verification QR on it.
+  const [tallyPrint, setTallyPrint] = useState<{ inspectionId: string; qr: string }>();
   const [copied, setCopied] = useState(false);
   const qrDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (qrOpen) qrDialog.current?.showModal(); }, [qrOpen]);
@@ -77,6 +82,7 @@ export function CertificatesView() {
   async function print(record: AssetRecord, certificate: Certificate) {
     const fresh = await makeQr(record, certificate);
     const inspection = state.inspections.find((item) => item.id === certificate.sourceInspectionId);
+    if (fresh && inspection?.joints) { setTallyPrint({ inspectionId: inspection.id, qr: fresh.image }); return; }
     if (fresh) setPrinting({ kind: "certificate", ...snapshot(record, certificate, state.demoDate), result: certificate.result, qr: fresh.image, site: record.site, serialNo: record.serialNo, inspector: inspection?.inspector, inspectorSignature: inspection?.signature, inspectedAt: inspection?.submittedAt, approvedAt: inspection?.reviewedAt, nextInspection: inspection?.nextInspectionDate ?? record.inspectionDueDate });
   }
 
@@ -88,20 +94,22 @@ export function CertificatesView() {
   }
 
   return <div className="flex flex-col gap-5">
-    <Card><CardHeader><div className="eyebrow">Certificate register</div><CardTitle>{certificates.length} certificate{certificates.length === 1 ? "" : "s"}</CardTitle></CardHeader>
+    <Card><CardHeader><div className="eyebrow">{IS_AMS ? "Report register" : "Certificate register"}</div><CardTitle>{certificates.length} {IS_AMS ? "report" : "certificate"}{certificates.length === 1 ? "" : "s"}</CardTitle></CardHeader>
       <CardContent>{certificates.length ? <div className="grid gap-4 xl:grid-cols-2">{certificates.map(({ record, certificate }) => {
         const details = snapshot(record, certificate, state.demoDate);
+        const tally = state.inspections.find((item) => item.id === certificate.sourceInspectionId && item.joints);
+        const counts = tally && summarizeTally(tally.connection!, tally.joints!);
         return <div key={certificate.id} className="min-w-0 rounded-xl border border-line bg-white p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow">{record.assetRef} · {record.site}</div><h3 className="mt-1 break-all text-lg font-bold text-navy">{certificate.number}</h3><p className="mt-1 text-sm text-slate-500">{record.assetType}</p></div><Badge variant={details.status === "Valid" ? "success" : details.status === "Expired" ? "warning" : "danger"}>{details.status}</Badge></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow">{record.assetRef} · {counts ? `${record.owner} · ` : ""}{record.site}</div><h3 className="mt-1 break-all text-lg font-bold text-navy">{certificate.number}</h3><p className="mt-1 text-sm text-slate-500">{record.assetType}{counts && ` · ${counts.total} joints, ${counts.premium} Premium, ${counts.reject} Reject`}</p></div><Badge variant={details.status === "Valid" ? "success" : details.status === "Expired" ? "warning" : "danger"}>{details.status}</Badge></div>
           <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-paper p-3 text-sm"><div><div className="eyebrow">Issued</div><div className="mt-1 font-semibold text-navy">{formatDate(certificate.issuedDate)}</div></div><div><div className="eyebrow">Expires</div><div className="mt-1 font-semibold text-navy">{formatDate(certificate.expiryDate)}</div></div></div>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void print(record, certificate)}><Printer />Print</Button>
-            <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void printWarranty(record)}><FileBadge />{busy === `warranty:${record.id}` ? "Preparing…" : "Warranty"}</Button>
+            {!IS_AMS && <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void printWarranty(record)}><FileBadge />{busy === `warranty:${record.id}` ? "Preparing…" : "Warranty"}</Button>}
             <Button variant="secondary" size="sm" disabled={Boolean(busy)} onClick={() => void showQr(record, certificate)}><QrCode />{busy === certificate.id ? "Generating…" : currentQr(record, certificate) ? "Show QR" : "Create QR"}</Button>
             {canChange && (details.status === "Valid" || details.status === "Expired") && <Button variant="ghost" size="sm" className="text-danger" disabled={Boolean(busy)} onClick={() => revoke(record, certificate)}>Revoke</Button>}
           </div>
         </div>;
-      })}</div> : <div className="rounded-lg border border-dashed border-line px-4 py-14 text-center"><ShieldCheck className="mx-auto size-9 text-[#b8cedc]" /><p className="mt-3 text-sm text-slate-500">Import a supplied certificate or approve a passed inspection to begin.</p></div>}
+      })}</div> : <div className="rounded-lg border border-dashed border-line px-4 py-14 text-center"><ShieldCheck className="mx-auto size-9 text-[#b8cedc]" /><p className="mt-3 text-sm text-slate-500">{IS_AMS ? "Approve a submitted tally sheet to issue its report." : "Import a supplied certificate or approve a passed inspection to begin."}</p></div>}
         {error && <p className="mt-4 rounded-lg bg-[#fff3f3] p-3 text-sm text-danger" role="alert">{error}</p>}
       </CardContent>
     </Card>
@@ -117,6 +125,7 @@ export function CertificatesView() {
         <Button variant="ghost" size="sm" onClick={() => qrDialog.current?.close()}>Close</Button>
       </div>
     </dialog>, document.body)}
+    {tallyPrint && <TallyReportDialog inspectionId={tallyPrint.inspectionId} qr={tallyPrint.qr} onClose={() => setTallyPrint(undefined)} />}
     {printing && createPortal(<dialog ref={dialog} aria-label={printing.kind === "warranty" ? "Warranty print preview" : "Certificate print preview"} onClose={() => setPrinting(undefined)} className="certificate-print-area animate-rise fixed inset-0 m-auto max-h-[95vh] w-[min(95vw,850px)] overflow-auto bg-white p-5 backdrop:bg-black/50 sm:p-10">
       <div className="print-hidden mb-5 flex justify-end gap-2"><Button onClick={() => window.print()}>Print / Save PDF</Button><Button variant="outline" onClick={() => dialog.current?.close()}>Close</Button></div>
       {printing.kind === "warranty" ? <WarrantyDocument {...printing} /> : <div className="mx-auto border-[8px] border-[#0b3151] p-1"><div className="border border-[#b8cedc] p-5 sm:p-10">

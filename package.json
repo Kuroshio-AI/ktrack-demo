@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:fls": "NEXT_PUBLIC_CLIENT=fls next dev --port 3001",
+    "dev:ams": "NEXT_PUBLIC_CLIENT=ams next dev --port 3002",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",

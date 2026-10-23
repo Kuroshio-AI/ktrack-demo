@@ -34,6 +34,15 @@ npm run build
 
 Production demo: [kuroshio-ktrack.vercel.app](https://kuroshio-ktrack.vercel.app) (the old keetrack.vercel.app address still works) · source: [github.com/Kuroshio-AI/ktrack-demo](https://github.com/Kuroshio-AI/ktrack-demo). This repo is the sales demo; the production build lives in the private Kuroshio-AI/ktrack repo.
 
+## AMS profile (drill string inspection)
+
+`NEXT_PUBLIC_CLIENT=ams`, or `npm run dev:ams` on port 3002, builds a drill string inspection demo for Al Mansoori Inspection Services. Its pages are Dashboard, Tally sheets, Approvals, Reports, Connections, Alerts, Sustainability and Demo Controls.
+
+- **Connections** is the dimension table: one row per size, weight, connection and grade, with a min and/or max for each dimension in inches. It imports from Excel through the template's columns (`Size`, `Weight`, `Connection`, `Grade`, then `<dimension> min` and `<dimension> max`). A blank size, weight or connection repeats the row above, like the printed table. An imported row replaces the one with the same four keys.
+- **Tally sheets.** Opening a job creates its record and a tally sheet with one line per joint. The sheet keeps its own copy of the connection's limits, so a later import never regrades it. Each reading is checked as it is typed (`lib/tally.ts`): a value past a limit, or a failed visual check, rejects the joint; a joint with every value in and a passed visual check is Premium. Values compare at three decimals, and a value on the limit passes. There is no Class 2 yet. Tab moves across, Enter moves down, and a block pasted from Excel fills from the cell it lands in.
+- **Reports.** Approving a complete tally sheet issues a numbered report with its rejects listed, valid for six months by default. The printed report is worked out from the tally: totals, reject reasons, rejected joints and the full tally. The QR verify page names it an inspection report.
+- **Sample data.** A new browser, or Reset in Demo Controls, opens on made-up sample connections (`Sample 50`), one issued job and one tally sheet with four joints left to fill in. The client's own dimension table is DS-1 content, licensed, so it never goes in this public repo: keep it in the git-ignored `contextforclient/` and import it in the browser.
+
 ## FLS profile (second client)
 
 The same code also builds a Fire & Life Safety certificate tracker for a Dubai facilities client. Set `NEXT_PUBLIC_CLIENT=fls` at build time, or run `npm run dev:fls` locally on port 3001. That build has seven pages: Dashboard, Buildings, PPM checklists, Approvals, Alerts, Import and Demo Controls. It shows no Kee branding. Without the flag the Kee demo builds exactly as before.
