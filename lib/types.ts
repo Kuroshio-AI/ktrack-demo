@@ -128,7 +128,11 @@ export type InspectionPhoto = {
 };
 
 // AMS only: one row of a dimension table, the acceptance limits for one size, weight, connection and grade. All values in inches.
-export type Limit = { column: string; min?: number; max?: number };
+// min and max are the Premium limits; class2Min and class2Max are the Class 2 limits, where the table has them.
+export type Limit = { column: string; min?: number; max?: number; class2Min?: number; class2Max?: number };
+// What a condition code on the tally sheet means for the pipe, from the client's damage criteria.
+export type DamageOutcome = "Field repair" | "Rework" | "Class 2" | "Bent" | "Scrap";
+export type DamageCriterion = { code: string; criterion: string; outcome: DamageOutcome; sample?: boolean };
 export type ConnectionSpec = {
   id: string;
   size: string;
@@ -136,6 +140,8 @@ export type ConnectionSpec = {
   connection: string;
   grade: string;
   limits: Limit[];
+  // The table the row came from, e.g. "API RP 7G-2"; the F.581 prints it. Rows without one are DS-1.
+  standard?: string;
   // Made-up rows that ship with the public demo; the client's own table is imported.
   sample?: boolean;
 };
@@ -173,6 +179,8 @@ export type TallyJob = {
   equipmentIds: string[];
   // Copied on submission, so an issued report keeps the calibration dates it was checked against.
   equipment?: Equipment[];
+  // The damage criteria the sheet is graded with: live while it is a draft, fixed once submitted.
+  criteria?: DamageCriterion[];
 };
 
 export type Inspection = {
@@ -241,6 +249,7 @@ export type AppState = {
   savingCounters?: Record<string, number>;
   // AMS only: the dimension table that new tally sheets are checked against.
   connections?: ConnectionSpec[];
+  criteria?: DamageCriterion[];
   // AMS only: the inspection instruments and their calibration due dates.
   equipment?: Equipment[];
 };

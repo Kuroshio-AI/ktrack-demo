@@ -25,7 +25,7 @@ import type {
 import { REGISTER_HEADERS } from "./types";
 import { FLS_DUE_LEAD_DAYS, IS_FLS } from "./client";
 import { checklistFrom, type ChecklistTemplate } from "./fls-checklists";
-import { expiredEquipment, isConnectionSpec, isEquipment, isJoint, isTallyJob, tallyComplete } from "./tally";
+import { expiredEquipment, isConnectionSpec, isCriterion, isEquipment, isJoint, isTallyJob, tallyComplete } from "./tally";
 
 export const STORAGE_KEY = "keetrack-demo-state";
 export const STORAGE_VERSION = 1 as const;
@@ -133,6 +133,7 @@ export function validateStoredState(value: unknown): value is AppState {
     && (candidate.savings === undefined || (Array.isArray(candidate.savings) && candidate.savings.every(isSaving)))
     && (candidate.connections === undefined || (Array.isArray(candidate.connections) && candidate.connections.every(isConnectionSpec)))
     && (candidate.equipment === undefined || (Array.isArray(candidate.equipment) && candidate.equipment.every(isEquipment)))
+    && (candidate.criteria === undefined || (Array.isArray(candidate.criteria) && candidate.criteria.every(isCriterion)))
     && (counters === undefined || (Boolean(counters) && typeof counters === "object" && !Array.isArray(counters) && Object.values(counters).every((count) => Number.isSafeInteger(count) && count >= 0)))
     && isDateString(candidate.demoDate)
     && isRole(candidate.role)
@@ -430,8 +431,9 @@ const isComplete = (inspection: Inspection) => inspection.joints ? tallyComplete
 export function submitInspection(state: AppState, id: string, timestamp = nowIso()): AppState {
   const inspection = state.inspections.find((item) => item.id === id);
   if (!inspection || (inspection.status !== "Draft" && inspection.status !== "Returned") || !isComplete(inspection)) return state;
-  // A tally sheet needs every instrument it lists in calibration, and keeps a copy of them for its report.
-  const job = inspection.job && { ...inspection.job, equipment: (state.equipment ?? []).filter((item) => inspection.job!.equipmentIds.includes(item.id)) };
+  // A tally sheet needs every instrument it lists in calibration. It keeps a copy of them, and of the damage criteria it was
+  // graded with, for its report.
+  const job = inspection.job && { ...inspection.job, equipment: (state.equipment ?? []).filter((item) => inspection.job!.equipmentIds.includes(item.id)), criteria: inspection.job.criteria ?? state.criteria };
   if (job && expiredEquipment(job.equipment, job.equipmentIds, state.demoDate).length) return state;
   const next: AppState = { ...state, inspections: state.inspections.map((item) => item.id === id ? { ...item, ...(job && { job }), status: "Submitted", submittedAt: timestamp, updatedAt: timestamp } : item), alerts: state.alerts.map((alert) => alert.occurrenceKey.startsWith(`returned:${id}`) ? { ...alert, status: "resolved" as const } : alert) };
   const record = getRecord(state, inspection.assetId);

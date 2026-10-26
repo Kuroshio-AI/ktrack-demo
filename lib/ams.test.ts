@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { before } from "node:test";
 import * as XLSX from "xlsx";
-import type { ConnectionSpec, Joint } from "./types";
+import type { ConnectionSpec, Inspection, Joint } from "./types";
 
 // The AMS build is chosen at build time; node --test runs each file in its own process, so setting it here touches no other test.
 process.env.NEXT_PUBLIC_CLIENT = "ams";
@@ -50,11 +50,52 @@ test("the summary fills the F.581 results table: classes, rework by side and coa
   assert.equal(row("ID coating cond. 3 & 4").count, 1);
 });
 
-function workbook(rows: unknown[][]): ArrayBuffer {
+test("a reading past Premium but inside Class 2 makes the pipe Class 2, past Class 2 scraps it, and a connection dimension means rework", () => {
+  const tiered: ConnectionSpec = { id: "t", size: "5", weight: "19.50", connection: "NC50", grade: "G105", standard: "API RP 7G-2", limits: [
+    { column: "Tool joint OD", min: 6.1, class2Min: 6 }, { column: "Tool joint ID", max: 3.8, class2Max: 3.95 }, { column: "Counterbore length", min: 0.55 },
+  ] };
+  const pipe = (values: Record<string, number>): Joint => ({ no: 1, values: { length: 31, remWall: 0.34, boxOd: 6.2, pinId: 3.75, cboreDepth: 0.6, ...values }, codes: {} });
+  const grade = (values: Record<string, number>) => ams.gradePipe(tiered, job, pipe(values));
+  assert.equal(grade({}).final, "Premium-Accepted");
+  assert.equal(grade({ boxOd: 6.1 }).final, "Premium-Accepted", "on the Premium limit");
+  assert.deepEqual([grade({ boxOd: 6.05 }).final, ams.failureText(grade({ boxOd: 6.05 }).failures[0])], ["Class-2", "Box OD 6.050, Premium min 6.100"]);
+  assert.deepEqual([grade({ boxOd: 5.99 }).final, ams.failureText(grade({ boxOd: 5.99 }).failures[0])], ["Scrap", "Box OD 5.990, Class 2 min 6.000"]);
+  assert.deepEqual([grade({ pinId: 3.9 }).final, grade({ pinId: 3.97 }).final], ["Class-2", "Scrap"], "a maximum works the same way");
+  assert.equal(grade({ cboreDepth: 0.5 }).final, "Premium-Rework");
+  assert.equal(ams.gradePipe(tiered, job, { no: 1, values: { length: 31, remWall: 0.34, boxOd: 6.2 }, codes: {} }).final, "Pending", "the RP 7G-2 columns make pin ID and c'bore depth required");
+  assert.deepEqual([ams.class2Text(tiered.limits[0]), ams.class2Text({ column: "X", min: 1, max: 2, class2Min: 0.9 })], ["6.000", "min 0.900"], "the side word drops only under a one-sided Premium limit");
+});
+
+function workbook(rows: unknown[][], more: [string, unknown[][]][] = []): ArrayBuffer {
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(rows), "Table");
+  for (const [name, sheet] of more) XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet(sheet), name);
   return XLSX.write(book, { bookType: "xlsx", type: "array" });
 }
+
+// Made-up values in the RP 7G-2 layout: the standard is licensed, so its numbers stay out of this public repo.
+test("an API RP 7G-2 table in millimetres imports in inches, rounded to the safe side, with its connection limits added", () => {
+  const { specs, errors, shared } = ams.parseConnectionsWorkbook(workbook([
+    ["Size", "Weight", "Grade", "Connection", "Standard", "Unit", "Tool joint OD min", "Tool joint OD class 2 min", "Tool joint ID max", "Tool joint ID class 2 max"],
+    ["5", "19.50", "G105", "NC50", "API RP 7G-2", "mm", 154.9, 152.5, 96.1, 100.05],
+    ["", "", "S135", "", "", "", 160, 157, 87, 92],
+    ["", "", "X95", "", "", "cm", 153, 151, 98, 101],
+  ], [["Table C.7", [["Connection", "Unit", "Counterbore diameter max", "Counterbore length min"], ["NC50", "mm", 136.6, 14.3], ["NC46", "mm", 126.3, 14.3]]]]));
+  assert.deepEqual(errors.map((error) => [error.row, error.field]), [[4, "Unit"]]);
+  assert.equal(shared, 2);
+  assert.deepEqual(specs.map((spec) => [spec.grade, spec.standard]), [["G105", "API RP 7G-2"], ["S135", "API RP 7G-2"]], "standard and unit carry down");
+  assert.deepEqual(specs[0].limits, [
+    { column: "Tool joint OD", min: 6.099, class2Min: 6.004 },
+    { column: "Tool joint ID", max: 3.783, class2Max: 3.938 },
+    { column: "Counterbore diameter", max: 5.377 },
+    { column: "Counterbore length", min: 0.563 },
+  ]);
+  const boxOd = ams.TALLY_COLUMNS.find((column) => column.key === "boxOd")!;
+  assert.deepEqual(ams.limitFor(boxOd, specs[0], job), { column: "Tool joint OD", min: 6.099, class2Min: 6.004 }, "RP 7G-2 names fill the F.582 columns");
+  const state = { ...ams.createInitialState("2026-10-23"), connections: specs, equipment: [] };
+  assert.equal(ams.createTally(state, { ...tallyInput, connectionId: specs[0].id }).inspection.job?.standard, "API RP 7G-2");
+  assert.match(ams.parseConnectionsWorkbook(workbook([["Size", "Weight", "Connection", "Grade", "Box OD min", "Box OD class 2 min"], ["5", "19.50", "XT50", "S", 6.19, 6.25]])).errors[0].message, /tighter/);
+});
 
 test("the dimension table template reads back as the same connections", () => {
   const { specs, errors } = ams.parseConnectionsWorkbook(workbook(ams.templateMatrix()));
@@ -121,6 +162,26 @@ test("an added instrument joins the register and new tally sheets, and its seria
   assert.throws(() => ams.addEquipment(state, { kind: "Thread gauge", model: "TG-2", serial: "tg-0042", calibrationDue: "2027-01-01" }), /already listed/);
   assert.throws(() => ams.addEquipment(state, { kind: "Thread gauge", model: "", serial: "TG-7", calibrationDue: "2027-01-01" }), /model/);
   assert.throws(() => ams.addEquipment(state, { kind: "Thread gauge", model: "TG-2", serial: "TG-7", calibrationDue: "" }), /due date/);
+});
+
+test("damage criteria decide what a code does: changing one regrades open sheets but not issued reports", () => {
+  const state = ams.amsInitialState("2026-10-23");
+  const draft = (current: typeof state) => current.inspections.find((item) => item.status === "Draft")!;
+  const issued = (current: typeof state) => current.inspections.find((item) => item.status === "Issued")!;
+  const classOf = (inspection: Inspection, code: string) => inspection.joints!.filter((joint) => Object.values(joint.codes).includes(code)).map((joint) => ams.gradePipe(inspection.connection!, inspection.job!, joint).final);
+  assert.deepEqual(classOf(draft(state), "TD"), ["Premium-Rework"]);
+  const before = classOf(issued(state), "TD");
+  const next = ams.updateCriterion(state, "TD", { outcome: "Class 2" });
+  assert.deepEqual(classOf(draft(next), "TD"), ["Class-2"]);
+  assert.deepEqual(classOf(issued(next), "TD"), before, "an issued report keeps the criteria it was graded with");
+  assert.equal(next.activity[0].event, "Damage criterion changed");
+  const repaired = ams.gradePipe(spec, { nominalWall: 0.362, criteria: next.criteria }, with_((joint) => { joint.codes.boxCond = "NFS"; }));
+  assert.deepEqual([repaired.final, repaired.repaired], ["Premium-Accepted", "box"], "a field repair keeps the class");
+  const reworded = ams.updateCriterion(next, "TD", { criterion: "Our own wording." });
+  assert.deepEqual(reworded.criteria?.find((item) => item.code === "TD"), { code: "TD", criterion: "Our own wording.", outcome: "Class 2" }, "rewording drops the Sample mark");
+  assert.equal(ams.updateCriterion(reworded, "TD", { outcome: "Class 2" }), reworded, "no change, no new state");
+  assert.throws(() => ams.updateCriterion(state, "TD", { criterion: "  " }), /Describe/);
+  assert.ok(ams.validateStoredState(JSON.parse(JSON.stringify(reworded))));
 });
 
 test("a new browser opens on the sample jobs, and that workspace survives a save and reload", () => {

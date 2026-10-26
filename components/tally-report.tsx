@@ -7,9 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Signature } from "@/components/warranty-document";
 import { ADDITIONAL_SERVICES, INSPECTION_PROGRAM } from "@/lib/ams";
 import { AMS_NAME } from "@/lib/client";
-import { CODES, gradePipe, inches, limitFailure, limitFor, limitText, readingText, reasons, summarizeTally, TALLY_COLUMNS, type Group } from "@/lib/tally";
-import type { AssetRecord, Certificate, Equipment, FinalClass, Inspection } from "@/lib/types";
+import { class2Text, CODES, gradePipe, inches, limitFailure, limitFor, limitText, readingText, reasons, summarizeTally, TALLY_COLUMNS, type Group } from "@/lib/tally";
+import type { AssetRecord, Certificate, DamageOutcome, Equipment, FinalClass, Inspection } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
+
+// A condition code, or a reading past its limit, coloured by what it does to the pipe.
+export const OUTCOME_TONE: Record<DamageOutcome, string> = {
+  "Field repair": "bg-[#e8f3f8] text-navy", Rework: "bg-[#fff2d7] text-[#8a5d00]", "Class 2": "bg-[#ffeadb] text-[#b45309]", Bent: "bg-[#ffeadb] text-[#b45309]", Scrap: "bg-[#fde8e8] text-danger",
+};
 
 export const CLASS_TONE: Record<FinalClass | "Pending", string> = {
   "Class 1 (New)": "text-success", "Premium-Accepted": "text-success", "Class 1-Rework": "text-[#8a5d00]", "Premium-Rework": "text-[#8a5d00]",
@@ -40,7 +45,7 @@ export function TallyReport({ inspection, record, certificate, equipment, qr }: 
     <div className="f581-page border-[3px] border-[#0b3151] p-4 sm:p-6">
       <header className="text-center"><div className="text-lg font-black uppercase tracking-[.08em] text-navy">{AMS_NAME}</div><div className="text-xs font-bold uppercase tracking-[.12em] text-slate-600">Drill pipe inspection summary report</div></header>
 
-      <Box className="mt-4"><table className="w-full border-collapse"><tbody>{header.map((row, index) => <tr key={index} className="border-b border-[#0b3151] last:border-b-0">{row.map(([label, value]) => <Fragment key={label}><th className="w-[16%] border-r border-[#0b3151] bg-[#fbf4ee] px-2 py-1 text-left text-[9.5px] font-bold uppercase">{label}</th><td className={`border-r border-[#0b3151] px-2 py-1 font-semibold text-navy last:border-r-0 ${label === "Report no." ? "tally-mono" : ""}`}>{value}</td></Fragment>)}</tr>)}</tbody></table></Box>
+      <Box className="mt-3"><table className="w-full border-collapse"><tbody>{header.map((row, index) => <tr key={index} className="border-b border-[#0b3151] last:border-b-0">{row.map(([label, value]) => <Fragment key={label}><th className="w-[16%] border-r border-[#0b3151] bg-[#fbf4ee] px-2 py-1 text-left text-[9.5px] font-bold uppercase">{label}</th><td className={`border-r border-[#0b3151] px-2 py-1 font-semibold text-navy last:border-r-0 ${label === "Report no." ? "tally-mono" : ""}`}>{value}</td></Fragment>)}</tr>)}</tbody></table></Box>
 
       <Box className="mt-2"><div className="grid grid-cols-[1.4fr_1fr] divide-x divide-[#0b3151]">
         <div className="px-3 py-2"><div className="text-center text-[9.5px] font-bold uppercase tracking-[.1em]">Inspection program</div><ul className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1">{INSPECTION_PROGRAM.map((item) => <Tick key={item} on={job.program.includes(item)} label={item} />)}</ul></div>
@@ -50,7 +55,7 @@ export function TallyReport({ inspection, record, certificate, equipment, qr }: 
 
       <Box className="mt-1"><div className="grid grid-cols-[1.3fr_1fr] divide-x divide-[#0b3151]">
         <div><div className="form-band border-b border-[#0b3151] py-1 text-center text-[9.5px] font-bold uppercase tracking-[.1em]">Material description</div><dl className="grid grid-cols-2">{material.map(([label, value], index) => <div key={label} className={`flex border-b border-[#0b3151] ${index % 2 === 0 ? "border-r" : ""} [&:nth-last-child(-n+2)]:border-b-0`}><dt className="w-[52%] border-r border-[#0b3151] bg-[#fbf4ee] px-2 py-1 text-[9.5px] font-bold uppercase">{label}</dt><dd className="tally-mono px-2 py-1 font-medium text-navy">{value}</dd></div>)}</dl></div>
-        <div><div className="form-band border-b border-[#0b3151] py-1 text-center text-[9.5px] font-bold uppercase tracking-[.1em]">Remark</div><p className="px-3 py-2">{spec.sample ? "Acceptance limits on this demo report are sample values, not DS-1." : `Tool joints checked against ${job.standard}, used tool joint acceptance criteria.`} Remaining wall checked against 80% of nominal for Premium.</p></div>
+        <div><div className="form-band border-b border-[#0b3151] py-1 text-center text-[9.5px] font-bold uppercase tracking-[.1em]">Remark</div><p className="px-3 py-2">{spec.sample ? "Acceptance limits on this demo report are sample values, not DS-1." : `Tool joints checked against ${job.standard}, used tool joint acceptance criteria.`} Remaining wall: Premium from 80% of nominal, Class 2 from 70%. Condition codes graded by the damage criteria in force when the sheet was submitted.</p></div>
       </div></Box>
 
       <Box className="mt-2"><table className="w-full border-collapse text-center">
@@ -63,13 +68,13 @@ export function TallyReport({ inspection, record, certificate, equipment, qr }: 
       <Box className="mt-2" title="Down graded pipes"><ul className="min-h-8 px-3 py-2">{summary.downgraded.length ? summary.downgraded.map(({ joint, graded }) => <li key={joint.no} className="flex gap-3 py-0.5"><span className="tally-mono w-20 shrink-0 font-semibold text-navy">{joint.serial ?? `Pipe ${joint.no}`}</span><span className={`w-28 shrink-0 font-bold ${CLASS_TONE[graded.final]}`}>{graded.final}</span><span className="text-slate-600">{reasons(graded).join("; ") || "Inspector's call"}</span></li>) : <li className="text-slate-500">None.</li>}</ul></Box>
       <Box className="mt-2" title="Comments"><p className="min-h-8 whitespace-pre-wrap px-3 py-1.5">{inspection.notes.trim() || "None."}</p></Box>
 
-      <Box className="mt-2" title="Equipment details"><div className="grid grid-cols-3">{equipment.map((item, index) => <dl key={item.id} className={`border-b border-[#d6dee5] px-2 py-1.5 ${index % 3 !== 2 ? "border-r border-r-[#d6dee5]" : ""}`}><dt className="text-[9.5px] font-bold uppercase text-navy">{item.kind}</dt><dd className="tally-mono text-[10px] text-slate-600">Model {item.model} · S/N {item.serial}</dd><dd className="tally-mono text-[10px] text-slate-600">Cal. due {formatDate(item.calibrationDue)}</dd></dl>)}{!equipment.length && <p className="col-span-3 px-3 py-2 text-slate-500">No instruments listed.</p>}</div></Box>
+      <Box className="mt-2" title="Equipment details"><div className="grid grid-cols-3">{equipment.map((item, index) => <dl key={item.id} className={`border-b border-[#d6dee5] px-2 py-1 ${index % 3 !== 2 ? "border-r border-r-[#d6dee5]" : ""}`}><dt className="text-[9.5px] font-bold uppercase text-navy">{item.kind}</dt><dd className="tally-mono text-[10px] text-slate-600">Model {item.model} · S/N {item.serial}</dd><dd className="tally-mono text-[10px] text-slate-600">Cal. due {formatDate(item.calibrationDue)}</dd></dl>)}{!equipment.length && <p className="col-span-3 px-3 py-2 text-slate-500">No instruments listed.</p>}</div></Box>
 
-      <div className="mt-4 flex break-inside-avoid items-end gap-6">
+      <div className="mt-3 flex break-inside-avoid items-end gap-6">
         {qr && <div className="shrink-0 text-center"><img src={qr} alt="Report verification QR" className="mx-auto size-24" /><div className="text-[9px] font-bold uppercase tracking-[.1em] text-slate-500">Scan to verify</div></div>}
         <div className="grid flex-1 grid-cols-3 gap-6"><Signature label="Customer signature" name="" /><Signature label="Inspector name & signature" name={inspection.inspector} date={inspection.submittedAt} image={inspection.signature} /><Signature label="Approved by" name={certificate ? "Authorised reviewer" : "Awaiting approval"} date={certificate ? inspection.reviewedAt : undefined} /></div>
       </div>
-      <footer className="mt-4 flex justify-between border-t border-[#0b3151] pt-1.5 text-[9px] text-slate-500"><span>Laid out as F.581 · filled in by KTrack from tally sheet F.582 · demo report, fictional job{spec.sample ? ", sample limits" : ""}</span><span>Page 1 of 2</span></footer>
+      <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1.5 text-[9px] text-slate-500"><span>Laid out as F.581 · filled in by KTrack from tally sheet F.582 · demo report, fictional job{spec.sample ? ", sample limits" : ""}</span><span>Page 1 of 2</span></footer>
     </div>
 
     <div className="tally-page mt-8 border-[3px] border-[#0b3151] p-4">
@@ -87,7 +92,7 @@ export function TallyReport({ inspection, record, certificate, equipment, qr }: 
             const flagged = failed || (column.kind === "code" && joint.codes[column.key] && joint.codes[column.key] !== "OK");
             return <td key={column.key} className={`tally-mono border border-[#b9c6d0] px-0.5 text-right ${flagged ? "font-bold text-danger" : ""} ${column.kind === "class" ? `whitespace-nowrap text-left font-bold ${CLASS_TONE[graded.final]}` : ""}`}>{text}</td>;
           })}</tr>; })}
-          <tr className="form-limits font-semibold"><td className="border border-[#0b3151] px-0.5 text-[7px] uppercase">Required / limit</td>{TALLY_COLUMNS.map((column, index) => <td key={column.key} className="tally-mono border border-[#0b3151] px-0.5 text-right">{limits[index] ? limitText(limits[index]!).replace(" to ", "–") : ""}</td>)}</tr>
+          <tr className="form-limits font-semibold"><td className="border border-[#0b3151] px-0.5 text-[7px] uppercase">Required / limit</td>{TALLY_COLUMNS.map((column, index) => <td key={column.key} className="tally-mono border border-[#0b3151] px-0.5 text-right">{limits[index] ? limitText(limits[index]!).replace(" to ", "–") : ""}{limits[index] && class2Text(limits[index]!) && <span className="block font-normal">C2 {class2Text(limits[index]!).replace(" to ", "–")}</span>}</td>)}</tr>
         </tbody>
       </table>
       <p className="mt-1.5 text-[7.5px] text-slate-600"><b>ID coating:</b> 1 intact; 2 over 80% overall, over 75% localised; 3 65 to 80% overall, 50 to 75% localised; 4 under 65% overall, under 50% localised. <b>Codes:</b> {Object.entries(CODES).filter(([code]) => code !== "OK").map(([code, meaning]) => `${code} ${meaning.toLowerCase()}`).join(", ")}.</p>

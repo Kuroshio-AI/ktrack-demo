@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { motion, MotionConfig } from "motion/react";
 import { RollingNumber } from "@/components/interior/value-flash";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, Building2, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Gauge, Import, Leaf, Menu, Ruler, Settings2, ShieldCheck, X } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, Building2, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Gauge, Import, Leaf, ListChecks, Menu, Ruler, Settings2, ShieldCheck, X } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import { AlertsView } from "@/components/views/alerts-view";
 import { DemoControlsView } from "@/components/views/demo-controls-view";
 import { BuildingsView } from "@/components/views/buildings-view";
 import { ConnectionsView } from "@/components/views/connections-view";
+import { CriteriaView } from "@/components/views/criteria-view";
 import { EquipmentView } from "@/components/views/equipment-view";
 import { TallyView } from "@/components/views/tally-view";
 import { AMS_NAME, IS_AMS, IS_FLS } from "@/lib/client";
@@ -36,6 +37,7 @@ const nav = [
   { id: "approvals", label: "Approvals", icon: BookOpenCheck },
   { id: "certificates", label: "Certificates", icon: ShieldCheck },
   { id: "connections", label: "Connections", icon: Ruler },
+  { id: "criteria", label: "Damage criteria", icon: ListChecks },
   { id: "equipment", label: "Equipment", icon: Gauge },
   { id: "warranties", label: "Warranties", icon: FileBadge },
   { id: "sustainability", label: "Sustainability", icon: Leaf },
@@ -48,11 +50,11 @@ const nav = [
 const FLS_VIEWS: string[] = ["dashboard", "register", "inspections", "approvals", "alerts", "import", "demo-controls"];
 const FLS_LABELS: Record<string, { label: string; icon?: typeof Building2 }> = { register: { label: "Buildings", icon: Building2 }, inspections: { label: "PPM checklists" } };
 // The AMS build: tally sheets checked against the dimension table, approved into numbered reports. No register, warranties or import page.
-const AMS_VIEWS: string[] = ["dashboard", "inspections", "approvals", "certificates", "connections", "equipment", "alerts", "sustainability", "demo-controls"];
+const AMS_VIEWS: string[] = ["dashboard", "inspections", "approvals", "certificates", "connections", "criteria", "equipment", "alerts", "sustainability", "demo-controls"];
 const AMS_LABELS: Record<string, { label: string; icon?: typeof Building2 }> = { inspections: { label: "Tally sheets", icon: ClipboardList }, certificates: { label: "Reports", icon: FileCheck2 } };
 const shownNav = IS_FLS ? nav.filter(({ id }) => FLS_VIEWS.includes(id)).map((item) => ({ ...item, ...FLS_LABELS[item.id] }))
   : IS_AMS ? nav.filter(({ id }) => AMS_VIEWS.includes(id)).map((item) => ({ ...item, ...AMS_LABELS[item.id] }))
-  : nav.filter(({ id }) => id !== "connections" && id !== "equipment");
+  : nav.filter(({ id }) => id !== "connections" && id !== "criteria" && id !== "equipment");
 
 const titles: Record<string, { eyebrow: string; title: string; description: string }> = {
   import: { eyebrow: "Data intake", title: "Import", description: "Validate a register or sustainability savings spreadsheet and review the rows before importing." },
@@ -83,6 +85,7 @@ const amsTitles: typeof titles = {
   approvals: { eyebrow: "Quality gate", title: "Approvals", description: "Check a submitted tally sheet's summary and approve it into a numbered report, or return it to the inspector with a correction." },
   certificates: { eyebrow: "Issued reports", title: "Reports", description: "Every approved inspection report, with its number and a QR code your customer can scan to check it is current." },
   connections: { eyebrow: "Acceptance criteria", title: "Connections", description: "The dimension table: the limits for each size, weight, connection and grade. Tally sheets are checked against it." },
+  criteria: { eyebrow: "Acceptance criteria", title: "Damage criteria", description: "What each condition code on the tally sheet records and what it does to the pipe. KTrack grades with these, and a change regrades the sheets still being filled in." },
   equipment: { eyebrow: "Calibration", title: "Equipment", description: "Every inspection instrument and its calibration due date. They print on the summary report, and an expired one stops a tally sheet being submitted." },
   alerts: { eyebrow: "Attention queue", title: "Alerts", description: "Tally sheets waiting for review or returned for correction, instruments due for calibration, and reports nearing their expiry." },
   sustainability: titles.sustainability,
@@ -97,6 +100,7 @@ function View({ view }: { view: string }): ReactNode {
     case "register": return IS_FLS ? <BuildingsView /> : <RegisterView />;
     case "inspections": return IS_AMS ? <TallyView /> : <InspectionsView />;
     case "connections": return IS_AMS ? <ConnectionsView /> : <DashboardView />;
+    case "criteria": return IS_AMS ? <CriteriaView /> : <DashboardView />;
     case "equipment": return IS_AMS ? <EquipmentView /> : <DashboardView />;
     case "approvals": return <ApprovalsView />;
     case "certificates": return <CertificatesView />;

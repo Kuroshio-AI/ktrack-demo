@@ -6,7 +6,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check, ChevronRight, ClipboardList, FileText, Plus, Send, ShieldCheck, Trash2, X } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { RollingNumber } from "@/components/interior/value-flash";
-import { TallyReportDialog } from "@/components/tally-report";
+import { OUTCOME_TONE, TallyReportDialog } from "@/components/tally-report";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +15,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ADDITIONAL_SERVICES, createTally, INSPECTION_PROGRAM, TALLY_TITLE } from "@/lib/ams";
 import { deleteInspection, submitInspection, updateInspection } from "@/lib/domain";
-import { calibrationStatus, CODES, connectionLabel, expiredEquipment, FINAL_CLASSES, gradePipe, inches, limitFailure, limitFor, limitText, readingText, reasons, summarizeTally, TALLY_COLUMNS, type Group, type TallyColumn } from "@/lib/tally";
+import { calibrationStatus, class2Text, CODES, connectionLabel, expiredEquipment, FINAL_CLASSES, gradePipe, inches, limitFailure, limitFor, limitText, readingText, reasons, SAMPLE_CRITERIA, summarizeTally, TALLY_COLUMNS, type Group, type TallyColumn } from "@/lib/tally";
 import type { AppState, FinalClass, Inspection, InspectionStatus, Joint, TallyJob } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -121,8 +121,6 @@ const CHIP: Record<FinalClass | "Pending", string> = {
   "Class 1 (New)": "text-success", "Premium-Accepted": "text-success", "Class 1-Rework": "bg-[#fff2d7] text-[#8a5d00]", "Premium-Rework": "bg-[#fff2d7] text-[#8a5d00]",
   "Class-2": "bg-[#ffeadb] text-[#b45309]", Bent: "bg-[#ffeadb] text-[#b45309]", Scrap: "bg-[#fde8e8] text-danger", Pending: "text-slate-400",
 };
-// A code cell is blank unless something is wrong; RFD is a repair, CRK scraps the pipe.
-const codeTone = (code?: string) => !code ? "" : code === "RFD" ? "bg-[#e8f3f8] text-navy font-semibold" : code === "CRK" ? "bg-[#fde8e8] text-danger font-semibold" : "bg-[#fff2d7] text-[#8a5d00] font-semibold";
 
 // The F.582 grid, kept as a spreadsheet because inspectors already work in F.582 and Excel: group bands, column names, the
 // green limits row, then one row per pipe. Each pipe's result is pinned next to its ID with the reason, and the chip is where
@@ -134,6 +132,7 @@ function TallyGrid({ inspection, rows, disabled, onChange }: { inspection: Inspe
   const joints = (inspection.joints ?? []).filter((joint) => !rows || rows.includes(joint.no));
   const order = joints.map((joint) => joint.no);
   const limits = GRID_COLUMNS.map((column) => limitFor(column, spec, job));
+  const criteria = job.criteria ?? SAMPLE_CRITERIA;
   const write = (no: number, cell: TallyColumn | "serial", text: string) => onChange((current) => current.map((joint) => joint.no === no ? applyCell(joint, cell, text) : joint));
   // Pasted lines go to the rows on screen, so a filtered grid fills the pipes it shows.
   function paste(event: ClipboardEvent<HTMLInputElement>, no: number, cell: number) {
@@ -168,7 +167,7 @@ function TallyGrid({ inspection, rows, disabled, onChange }: { inspection: Inspe
         <tr className="align-bottom text-[11px] font-bold leading-tight text-navy">{GRID_COLUMNS.map((column, index) => <th key={column.key} title={column.name} className={`border-b border-line bg-paper px-2 py-2 ${column.kind === "number" ? "text-right" : "text-center"} ${groupEdge(index) ? "border-r border-r-[#e9c9ae]" : ""}`}><span className="line-clamp-3 max-w-[80px]">{column.label}</span></th>)}</tr>
         <tr className="text-[10.5px]">
           <th colSpan={2} className="form-limits sticky left-0 z-10 border-b border-r border-[#c5e0ad] px-3 py-1.5 text-left font-semibold">Acceptable limit</th>
-          {GRID_COLUMNS.map((column, index) => <th key={column.key} className={`form-limits tally-mono border-b border-[#c5e0ad] px-2 py-1.5 text-right font-medium ${groupEdge(index) ? "border-r" : ""}`}>{limits[index] ? limitText(limits[index]!).replace(" to ", "–") : ""}</th>)}
+          {GRID_COLUMNS.map((column, index) => <th key={column.key} className={`form-limits tally-mono border-b border-[#c5e0ad] px-2 py-1.5 text-right font-medium ${groupEdge(index) ? "border-r" : ""}`}>{limits[index] ? limitText(limits[index]!).replace(" to ", "–") : ""}{limits[index] && class2Text(limits[index]!) && <span className="block text-[#b45309]" title="Class 2 limit">C2 {class2Text(limits[index]!).replace(" to ", "–")}</span>}</th>)}
         </tr>
       </thead>
       <tbody>{joints.map((joint) => {
@@ -197,13 +196,14 @@ function TallyGrid({ inspection, rows, disabled, onChange }: { inspection: Inspe
               const shown = value === undefined ? "" : readingText(column, value);
               const failure = limitFailure(column, limits[index], value);
               // Keyed by the stored value, so a paste or a refused entry redraws the cell with what was saved.
-              return <td key={column.key} className={`border-b border-line p-0 ${edge} ${failure ? "bg-[#fde8e8]" : ""}`}><input key={shown} data-col={cell} defaultValue={shown} readOnly={disabled} inputMode="decimal" aria-label={label} aria-invalid={Boolean(failure)} title={failure ? reasons({ ...graded, failures: [failure], defects: [] })[0] : undefined}
+              return <td key={column.key} className={`border-b border-line p-0 ${edge} ${failure ? OUTCOME_TONE[failure.outcome] : ""}`}><input key={shown} data-col={cell} defaultValue={shown} readOnly={disabled} inputMode="decimal" aria-label={label} aria-invalid={Boolean(failure)} title={failure ? reasons({ ...graded, failures: [failure], defects: [] })[0] : undefined}
                 onBlur={(event) => { if (event.currentTarget.value !== shown) write(joint.no, column, event.currentTarget.value); }} onKeyDown={(event) => key(event, cell)} onPaste={(event) => paste(event, joint.no, cell)}
-                className={`${cellInput} w-[64px] text-right ${failure ? "font-semibold text-danger" : "text-navy"}`} /></td>;
+                className={`${cellInput} w-[64px] text-right ${failure ? "font-semibold" : "text-navy"}`} /></td>;
             }
             const shown = column.kind === "code" ? joint.codes[column.key] ?? "" : joint.coating ? String(joint.coating) : "";
-            const tone = column.kind === "code" ? codeTone(joint.codes[column.key]) : (joint.coating ?? 0) >= 3 ? "bg-[#fff2d7] text-[#8a5d00] font-semibold" : "";
-            const hint = column.kind === "code" ? (shown ? CODES[shown] : "Blank is OK. Type a code: SD, TD, PT, PS, NFS, ST, GT, OT, GS, RFD, IE, IC, BB, CRK or BENT.") : "1 intact · 2 over 80% · 3 65 to 80% · 4 under 65%";
+            const rule = column.kind === "code" && shown ? criteria.find((item) => item.code === shown) : undefined;
+            const tone = rule ? `${OUTCOME_TONE[rule.outcome]} font-semibold` : column.kind === "coating" && (joint.coating ?? 0) >= 3 ? "bg-[#fff2d7] text-[#8a5d00] font-semibold" : "";
+            const hint = column.kind === "code" ? (rule ? `${shown}, ${CODES[shown].toLowerCase()}: ${rule.criterion} ${rule.outcome}.` : "Blank is OK. Type a code: SD, TD, PT, PS, NFS, ST, GT, OT, GS, RFD, IE, IC, BB, CRK or BENT.") : "1 intact · 2 over 80% · 3 65 to 80% · 4 under 65%";
             return <td key={column.key} className={`border-b border-line p-0 ${edge} ${tone}`}><input key={shown} data-col={cell} defaultValue={shown} readOnly={disabled} list={column.kind === "code" ? "tally-codes" : undefined} placeholder={column.kind === "code" ? "OK" : "–"} aria-label={label} title={hint}
               onBlur={(event) => { if (event.currentTarget.value.trim().toUpperCase() !== shown) write(joint.no, column, event.currentTarget.value); }} onKeyDown={(event) => key(event, cell)} onPaste={(event) => paste(event, joint.no, cell)}
               className={`${cellInput} text-center uppercase [&::-webkit-calendar-picker-indicator]:hidden ${column.kind === "code" ? "w-[62px]" : "w-[44px]"} ${tone ? "" : "text-navy"}`} /></td>;
