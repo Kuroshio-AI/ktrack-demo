@@ -161,7 +161,8 @@ export type Joint = {
 };
 
 // AMS only: an inspection instrument from the F.581 equipment details.
-export type Equipment = { id: string; kind: string; model: string; serial: string; calibrationDue: string };
+// calibratedOn is the last recorded calibration; instruments added without one have only a due date.
+export type Equipment = { id: string; kind: string; model: string; serial: string; calibrationDue: string; calibratedOn?: string };
 
 // AMS only: the F.581 and F.582 header fields that aren't on the job record (customer, rig and work order are).
 export type TallyJob = {

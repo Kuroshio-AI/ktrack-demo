@@ -164,6 +164,21 @@ test("an added instrument joins the register and new tally sheets, and its seria
   assert.throws(() => ams.addEquipment(state, { kind: "Thread gauge", model: "TG-2", serial: "TG-7", calibrationDue: "" }), /due date/);
 });
 
+test("recording a calibration sets both dates, clears the instrument's alert and is logged", () => {
+  const state = ams.amsInitialState("2026-10-23");
+  const gauge = state.equipment!.find((item) => item.kind === "Lead gauge")!;
+  const open = (current: typeof state) => current.alerts.filter((alert) => alert.event === "Calibration due" && alert.status === "open" && alert.assetRef === `Lead gauge ${gauge.serial}`);
+  assert.equal(open(ams.recalculateAlerts(state)).length, 1);
+  const next = ams.recalculateAlerts(ams.recordCalibration(state, gauge.id, "2026-10-23", "2027-10-23", "Manager"));
+  const after = next.equipment!.find((item) => item.id === gauge.id)!;
+  assert.deepEqual([after.calibratedOn, after.calibrationDue, ams.calibrationStatus(after, next.demoDate), open(next).length], ["2026-10-23", "2027-10-23", "Valid", 0]);
+  assert.deepEqual([next.activity[0].event, next.activity[0].actor], ["Instrument calibrated", "Manager"]);
+  assert.ok(ams.validateStoredState(next), "the stored state keeps validating");
+  assert.throws(() => ams.recordCalibration(state, gauge.id, "2026-10-24", "2027-10-24"), /future/);
+  assert.throws(() => ams.recordCalibration(state, gauge.id, "2026-10-23", "2026-10-23"), /after the calibration date/);
+  assert.throws(() => ams.recordCalibration(state, "gone", "2026-10-23", "2027-10-23"), /no longer listed/);
+});
+
 test("damage criteria decide what a code does: changing one regrades open sheets but not issued reports", () => {
   const state = ams.amsInitialState("2026-10-23");
   const draft = (current: typeof state) => current.inspections.find((item) => item.status === "Draft")!;

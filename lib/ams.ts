@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import { addDays, addMonthsClamped, approveInspection, createInitialState, isDateString, makeId, nowIso, recalculateAlerts, rowToRecord, submitInspection, todayString, trimValue } from "./domain";
 import { connectionLabel, DAMAGE_OUTCOMES, limitFor, SAMPLE_CRITERIA, TALLY_COLUMNS, type TallyColumn } from "./tally";
+import { formatDate } from "./utils";
 import type { Activity, AppState, ConnectionSpec, DamageOutcome, Equipment, ImportError, Inspection, Joint, Limit, Role, TallyJob } from "./types";
 
 // The client's dimension table is DS-1 content, licensed, and this repo is public: these rows are made up, and the real
@@ -213,8 +214,6 @@ export function createTally(state: AppState, input: TallyInput, actor = state.ro
   return { state: { ...state, records: [...state.records, record], inspections: [inspection, ...state.inspections], activity: [activityEntry("Job opened", `${jobNo} · ${connectionLabel(spec)}`, actor, timestamp), ...state.activity] }, inspection };
 }
 
-// The F.581 equipment details, one of each. Made-up models and serials; the lead gauge falls due first, so moving the
-// demo date a fortnight on shows a tally sheet blocked by an expired calibration.
 // Adds an instrument to the register. Serials are unique because the report identifies each instrument by its serial.
 export function addEquipment(state: AppState, input: Omit<Equipment, "id">): { state: AppState; item: Equipment } {
   const item: Equipment = { id: makeId("equipment"), kind: input.kind.trim(), model: input.model.trim(), serial: input.serial.trim(), calibrationDue: input.calibrationDue };
@@ -222,6 +221,21 @@ export function addEquipment(state: AppState, input: Omit<Equipment, "id">): { s
   if (!isDateString(item.calibrationDue)) throw new Error("Enter the calibration due date.");
   if ((state.equipment ?? []).some((other) => other.serial.toLowerCase() === item.serial.toLowerCase())) throw new Error(`An instrument with serial ${item.serial} is already listed.`);
   return { state: { ...state, equipment: [...(state.equipment ?? []), item] }, item };
+}
+
+// Records a calibration: the day it was done and the next due date from its certificate. The new due date clears the
+// instrument's calibration alert and unblocks tally sheets that used it.
+export function recordCalibration(state: AppState, id: string, calibratedOn: string, calibrationDue: string, actor = state.role, timestamp = nowIso()): AppState {
+  const item = (state.equipment ?? []).find((other) => other.id === id);
+  if (!item) throw new Error("That instrument is no longer listed.");
+  if (!isDateString(calibratedOn)) throw new Error("Enter the date it was calibrated.");
+  if (calibratedOn > state.demoDate) throw new Error("The calibration date can't be in the future.");
+  if (!isDateString(calibrationDue) || calibrationDue <= calibratedOn) throw new Error("Enter a next due date after the calibration date.");
+  return {
+    ...state,
+    equipment: state.equipment!.map((other) => other.id === id ? { ...other, calibratedOn, calibrationDue } : other),
+    activity: [activityEntry("Instrument calibrated", `${item.kind} ${item.serial}, next due ${formatDate(calibrationDue)}`, actor, timestamp), ...state.activity],
+  };
 }
 
 // Changing a damage criterion regrades the tally sheets still being filled in; submitted and issued sheets keep the criteria
@@ -247,9 +261,11 @@ export function updateCriterion(state: AppState, code: string, patch: { criterio
   };
 }
 
+// The F.581 equipment details, one of each, each calibrated a year before it falls due. Made-up models and serials; the
+// lead gauge falls due first, so moving the demo date a fortnight on shows a tally sheet blocked by an expired calibration.
 export function sampleEquipment(demoDate: string): Equipment[] {
   return ([["EMI console", "EMI-500", 142], ["EMI coil", "EC-5", 142], ["Mag. coil", "MC-12", 88], ["UT gauge", "UTG-38", 61], ["AC yoke", "AY-230", 205], ["UT flaw detector", "UFD-650", 119], ["UV meter", "UVM-25", 34], ["Lead gauge", "LG-4", 12], ["Profile gauge", "PG-6", 176]] as const)
-    .map(([kind, model, days], index) => ({ id: `eq-${index + 1}`, kind, model, serial: `AMS-${model.split("-")[0]}-${String(141 + index * 37).padStart(4, "0")}`, calibrationDue: addDays(demoDate, days) }));
+    .map(([kind, model, days], index) => ({ id: `eq-${index + 1}`, kind, model, serial: `AMS-${model.split("-")[0]}-${String(141 + index * 37).padStart(4, "0")}`, calibrationDue: addDays(demoDate, days), calibratedOn: addMonthsClamped(addDays(demoDate, days), -12) }));
 }
 
 // Repeatable readings for the sample jobs, spread by pipe and column: inside any limit, plausible otherwise.

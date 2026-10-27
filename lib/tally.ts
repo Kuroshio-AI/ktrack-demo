@@ -227,7 +227,7 @@ export function isJoint(value: unknown): value is Joint {
 export function isEquipment(value: unknown): value is Equipment {
   if (!value || typeof value !== "object") return false;
   const item = value as Partial<Equipment>;
-  return [item.id, item.kind, item.model, item.serial].every(isText) && isDate(item.calibrationDue);
+  return [item.id, item.kind, item.model, item.serial].every(isText) && isDate(item.calibrationDue) && (item.calibratedOn === undefined || isDate(item.calibratedOn));
 }
 
 export function isTallyJob(value: unknown): value is TallyJob {
