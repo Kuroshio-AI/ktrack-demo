@@ -3,7 +3,7 @@
 import { useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { flushSync } from "react-dom";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Check, ChevronRight, ClipboardList, FileText, Plus, Send, ShieldCheck, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, ChevronRight, ClipboardList, FileText, Minus, Plus, Send, ShieldCheck, Trash2, X } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { RollingNumber } from "@/components/interior/value-flash";
 import { OUTCOME_TONE, TallyReportDialog } from "@/components/tally-report";
@@ -13,8 +13,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ADDITIONAL_SERVICES, createTally, INSPECTION_PROGRAM, TALLY_TITLE } from "@/lib/ams";
-import { deleteInspection, submitInspection, updateInspection } from "@/lib/domain";
+import { ADDITIONAL_SERVICES, addPipe, createTally, deleteTally, INSPECTION_PROGRAM, isEmptyPipe, removeLastPipe, TALLY_TITLE } from "@/lib/ams";
+import { submitInspection, updateInspection } from "@/lib/domain";
 import { calibrationStatus, class2Text, CODES, connectionLabel, expiredEquipment, FINAL_CLASSES, gradePipe, inches, limitFailure, limitFor, limitText, readingText, reasons, SAMPLE_CRITERIA, summarizeTally, TALLY_COLUMNS, type Group, type TallyColumn } from "@/lib/tally";
 import type { AppState, FinalClass, Inspection, InspectionStatus, Joint, TallyJob } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
@@ -240,9 +240,20 @@ export function TallyView() {
   const changeJob = (patch: Partial<TallyJob>) => { if (selected) update((current) => { const item = current.inspections.find((inspection) => inspection.id === selected.id); return item?.job ? updateInspection(current, item.id, { job: { ...item.job, ...patch } }) : current; }); };
   const saveNotes = (notes: string) => { if (selected) update((current) => updateInspection(current, selected.id, { notes })); };
   function submit() { if (selected) flushSync(() => update((current) => submitInspection(current, selected.id))); }
-  function removeDraft() {
-    if (!selected || !window.confirm(`Delete the draft tally sheet for ${record?.assetRef ?? "this job"}? This cannot be undone.`)) return;
-    if (update((current) => deleteInspection(current, selected.id))) setSelectedId(undefined);
+  function removeDraft(inspection: Inspection) {
+    const ref = state.records.find((item) => item.id === inspection.assetId)?.assetRef ?? "this job";
+    const pipes = inspection.joints ?? [];
+    const measured = pipes.filter((joint) => !isEmptyPipe(joint)).length;
+    if (!window.confirm(`Delete the draft tally sheet ${ref}?${measured ? ` ${measured} of ${pipes.length} pipes ${measured === 1 ? "has readings" : "have readings"} that will be lost.` : ""} This can't be undone.`)) return;
+    if (update((current) => deleteTally(current, inspection.id)) && inspection.id === selectedId) setSelectedId(undefined);
+  }
+  // Pipes come and go at the end of the sheet; a new one takes focus on its pipe ID, ready for the next reading.
+  const pipes = selected?.joints ?? [];
+  const lastPipe = pipes.at(-1);
+  function addOnePipe() {
+    const no = (lastPipe?.no ?? 0) + 1;
+    changeJoints(addPipe);
+    requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`input[aria-label="Pipe ${no} identification number"]`)?.focus());
   }
 
   return <div className="flex flex-col gap-5">
@@ -251,12 +262,13 @@ export function TallyView() {
         {tallies.length ? <div className="flex flex-col gap-1">{tallies.map((inspection) => {
           const job = state.records.find((item) => item.id === inspection.assetId);
           const counts = summarizeTally(inspection.connection!, inspection.job!, inspection.joints!);
-          return <button key={inspection.id} type="button" onClick={() => setSelectedId(inspection.id)} className={`focus-ring grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 rounded-lg px-3 py-2.5 text-left text-sm sm:grid-cols-[140px_1fr_200px_100px] ${inspection.id === selectedId ? "bg-[#e8f3f8]" : "[@media(hover:hover)]:hover:bg-paper"}`}>
+          return <div key={inspection.id} className="flex items-center gap-1"><button type="button" onClick={() => setSelectedId(inspection.id)} className={`focus-ring grid min-w-0 flex-1 grid-cols-[1fr_auto] items-center gap-x-4 gap-y-1 rounded-lg px-3 py-2.5 text-left text-sm sm:grid-cols-[140px_1fr_200px_100px] ${inspection.id === selectedId ? "bg-[#e8f3f8]" : "[@media(hover:hover)]:hover:bg-paper"}`}>
             <span className="tally-mono font-semibold text-navy">{job?.assetRef ?? "Unknown job"}</span>
             <span className="hidden truncate text-slate-600 sm:block">{job?.owner} · {job?.site} · {inspection.connection && connectionLabel(inspection.connection)}</span>
             <span className="tally-mono hidden text-xs text-slate-500 sm:block">{counts.total - counts.pending}/{counts.total} graded · {counts.downgraded.length} not accepted</span>
             <Badge className="justify-self-end" variant={STATUS_BADGE[inspection.status]}>{inspection.status}</Badge>
-          </button>;
+          </button>
+          {canWork && (inspection.status === "Draft" ? <Button variant="ghost" size="icon" aria-label={`Delete draft ${job?.assetRef ?? ""}`} title="Delete draft" className="press shrink-0 text-slate-400 hover:bg-[#fff3f3] hover:text-danger" onClick={() => removeDraft(inspection)}><Trash2 /></Button> : <span className="size-9 shrink-0" aria-hidden="true" />)}</div>;
         })}</div> : <p className="text-sm text-slate-500">No tally sheets yet. Open one for a work order to start measuring.</p>}
         {creating && <NewTally onCreated={(id) => { setSelectedId(id); setCreating(false); }} onCancel={() => setCreating(false)} />}
         {!canWork && <p className="mt-3 text-xs text-slate-500">Switch to Engineer or Admin to open or fill in a tally sheet.</p>}
@@ -276,11 +288,12 @@ export function TallyView() {
         <ReportDetails key={`details-${selected.id}`} inspection={selected} disabled={!canEdit} onChange={changeJob} />
         {expired.length > 0 && <div role="alert" className="animate-rise flex gap-3 rounded-lg border border-[#f0c2c3] bg-[#fff6f6] px-4 py-3 text-sm text-danger"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><div><strong>This sheet can&apos;t be submitted.</strong> {expired.map((item) => `${item.kind} ${item.serial} calibration expired ${formatDate(item.calibrationDue)}`).join("; ")}. Record the new calibration in <Link href="/equipment" className="font-semibold underline">Equipment</Link>, or untick the instrument in Report details.</div></div>}
         <TallyGrid key={`grid-${selected.id}`} inspection={selected} rows={rows?.rows} disabled={!canEdit} onChange={changeJoints} />
+        {canEdit && !rows && <div className="-mt-2 flex flex-wrap items-center gap-2"><Button variant="outline" size="sm" className="press" onClick={addOnePipe}><Plus data-icon="inline-start" />Add pipe</Button>{lastPipe && pipes.length > 1 && isEmptyPipe(lastPipe) && <Button variant="ghost" size="sm" className="press" onClick={() => changeJoints(removeLastPipe)}><Minus data-icon="inline-start" />Remove pipe {lastPipe.no}</Button>}</div>}
         <div><label className="eyebrow" htmlFor="tally-notes">Comments</label><Textarea id="tally-notes" className="mt-1.5" defaultValue={selected.notes} key={selected.id} disabled={!canEdit} onBlur={(event) => { if (event.currentTarget.value !== selected.notes) saveNotes(event.currentTarget.value); }} placeholder="Conditions on site, anything the reviewer should know…" /></div>
         {selected.reviewerComment && selected.status === "Returned" && <div className="flex gap-2 rounded-lg border border-[#f0c2c3] bg-[#fff6f6] px-3 py-3 text-sm text-danger"><X className="mt-0.5 size-4 shrink-0" /><span><strong>Returned for correction.</strong> {selected.reviewerComment}</span></div>}
         <div className="border-t border-line pt-4" aria-live="polite">{selected.status === "Submitted" ? <div className="animate-rise flex flex-wrap items-center gap-3 rounded-lg border border-success/25 bg-success/[.06] px-4 py-3"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-success text-white"><Check className="draw-check size-5" strokeWidth={3} aria-hidden="true" /></span><div className="min-w-0 flex-1"><div className="text-sm font-semibold text-navy">Sent for review</div><div className="text-xs text-slate-600">The F.581 summary is filled in from this tally. A reviewer approves it in Approvals, and it is issued with a number and a QR code.</div></div><Button variant="outline" size="sm" onClick={() => setReport(true)}><FileText data-icon="inline-start" />Preview report</Button><Button asChild size="sm"><Link href="/approvals">Open Approvals<ArrowRight data-icon="inline-end" /></Link></Button></div>
           : selected.status === "Issued" ? <div className="animate-rise flex flex-wrap items-center gap-3 rounded-lg border border-success/25 bg-success/[.06] px-4 py-3"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-success text-white"><ShieldCheck className="size-5" aria-hidden="true" /></span><div className="min-w-0 flex-1"><div className="text-sm font-semibold text-navy">Report issued{certificate && ` · ${certificate.number}`}</div><div className="text-xs text-slate-600">Print it or show its QR code from Reports.</div></div><Button variant="outline" size="sm" onClick={() => setReport(true)}><FileText data-icon="inline-start" />View report</Button><Button asChild size="sm"><Link href="/certificates">Open Reports<ArrowRight data-icon="inline-end" /></Link></Button></div>
-          : <div className="flex flex-wrap items-center justify-end gap-2">{selected.status === "Draft" && canWork && <Button variant="ghost" className="mr-auto text-danger hover:bg-[#fff3f3]" onClick={removeDraft}><Trash2 data-icon="inline-start" />Delete draft</Button>}{summary.pending > 0 && <span className="text-xs text-slate-500">{summary.pending} pipe{summary.pending === 1 ? "" : "s"} still to measure</span>}<Button variant="outline" className="press" onClick={() => setReport(true)}><FileText data-icon="inline-start" />Preview report</Button><Button className="press" onClick={submit} disabled={!canEdit || summary.pending > 0 || expired.length > 0}><Send data-icon="inline-start" />Submit for review</Button></div>}</div>
+          : <div className="flex flex-wrap items-center justify-end gap-2">{summary.pending > 0 && <span className="text-xs text-slate-500">{summary.pending} pipe{summary.pending === 1 ? "" : "s"} still to measure</span>}<Button variant="outline" className="press" onClick={() => setReport(true)}><FileText data-icon="inline-start" />Preview report</Button><Button className="press" onClick={submit} disabled={!canEdit || summary.pending > 0 || expired.length > 0}><Send data-icon="inline-start" />Submit for review</Button></div>}</div>
       </CardContent>
     </Card> : <Card><CardContent className="flex min-h-[320px] flex-col items-center justify-center p-8 text-center"><ClipboardList className="size-10 text-[#b8cedc]" /><h2 className="mt-4 font-semibold text-navy">Open a tally sheet</h2><p className="mt-2 max-w-sm text-sm text-slate-500">Choose a work order above, or open a new tally sheet. Every reading is checked against the connection&apos;s dimension table as you type.</p></CardContent></Card>}
     {report && selected && <TallyReportDialog inspectionId={selected.id} onClose={() => setReport(false)} />}

@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { addDays, addMonthsClamped, approveInspection, createInitialState, isDateString, makeId, nowIso, recalculateAlerts, rowToRecord, submitInspection, todayString, trimValue } from "./domain";
+import { addDays, addMonthsClamped, approveInspection, createInitialState, deleteInspection, isDateString, makeId, nowIso, recalculateAlerts, rowToRecord, submitInspection, todayString, trimValue } from "./domain";
 import { connectionLabel, DAMAGE_OUTCOMES, limitFor, SAMPLE_CRITERIA, TALLY_COLUMNS, type TallyColumn } from "./tally";
 import { formatDate } from "./utils";
 import type { Activity, AppState, ConnectionSpec, DamageOutcome, Equipment, ImportError, Inspection, Joint, Limit, Role, TallyJob } from "./types";
@@ -212,6 +212,31 @@ export function createTally(state: AppState, input: TallyInput, actor = state.ro
   const joints: Joint[] = Array.from({ length: input.joints }, (_, index) => ({ no: index + 1, values: {}, codes: {} }));
   const inspection: Inspection = { id: makeId("inspection"), assetId: record.id, inspector, title: TALLY_TITLE, checklist: [], connection: spec, job, joints, notes: "", status: "Draft", createdAt: timestamp, updatedAt: timestamp };
   return { state: { ...state, records: [...state.records, record], inspections: [inspection, ...state.inspections], activity: [activityEntry("Job opened", `${jobNo} · ${connectionLabel(spec)}`, actor, timestamp), ...state.activity] }, inspection };
+}
+
+// A sheet's pipes follow the rack: one is added at the end, and only an empty last pipe comes off, so numbers never shift
+// under readings already taken.
+export const isEmptyPipe = (joint: Joint) => !joint.serial && !joint.coating && !joint.finalClass && !Object.keys(joint.values).length && !Object.values(joint.codes).some(Boolean);
+export const addPipe = (joints: Joint[]): Joint[] => [...joints, { no: (joints.at(-1)?.no ?? 0) + 1, values: {}, codes: {} }];
+export function removeLastPipe(joints: Joint[]): Joint[] {
+  const last = joints.at(-1);
+  if (!last || joints.length === 1 || !isEmptyPipe(last)) throw new Error("Only an empty last pipe can be removed, and a sheet keeps at least one.");
+  return joints.slice(0, -1);
+}
+
+// Deletes a draft tally sheet and, when nothing else uses it, the job it opened, so its work order number is free again.
+// A job with a report or another sheet stays.
+export function deleteTally(state: AppState, id: string, actor = state.role, timestamp = nowIso()): AppState {
+  const sheet = state.inspections.find((item) => item.id === id);
+  if (!sheet || sheet.status !== "Draft") return state;
+  const job = state.records.find((record) => record.id === sheet.assetId);
+  const keep = !job || job.certificates.length > 0 || state.inspections.some((other) => other.id !== id && other.assetId === job.id);
+  const next = deleteInspection(state, id);
+  return {
+    ...next,
+    records: keep ? next.records : next.records.filter((record) => record.id !== job.id),
+    activity: [activityEntry("Tally sheet deleted", `${job?.assetRef ?? "Draft"}, ${sheet.joints?.length ?? 0} pipes`, actor, timestamp), ...next.activity],
+  };
 }
 
 // Adds an instrument to the register. Serials are unique because the report identifies each instrument by its serial.
