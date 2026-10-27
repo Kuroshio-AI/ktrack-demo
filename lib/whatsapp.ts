@@ -6,7 +6,7 @@ export const WHATSAPP_REPLAY_MAX = 500;
 export const WHATSAPP_NOT_APPLICABLE = "Not applicable";
 
 const DEFAULT_GRAPH_API_VERSION = "v26.0";
-const DEFAULT_TEMPLATE_NAME = "kuroshio_alert";
+const DEFAULT_TEMPLATE_NAME = "keetrack_asset_alert";
 const DEFAULT_TEMPLATE_LANGUAGE = "en_US";
 const ALERT_TEXT_MAX_LENGTH = 160;
 const alertIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;

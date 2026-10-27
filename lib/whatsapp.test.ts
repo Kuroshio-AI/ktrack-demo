@@ -59,7 +59,7 @@ test("GET exposes safe Meta settings and defaults", async () => {
     webhookConfigured: true,
     tokenUpdatable: false,
     recipientLabel: "WhatsApp ending in •••• 4567",
-    templateName: "kuroshio_alert",
+    templateName: "keetrack_asset_alert",
     templateLanguage: "en_US",
     tokenSource: "server",
   });
@@ -212,7 +212,7 @@ test("accepted Meta responses send exactly five approved parameters from the req
     to: "15551234567",
     type: "template",
     template: {
-      name: "kuroshio_alert",
+      name: "keetrack_asset_alert",
       language: { code: "en_US" },
       components: [{
         type: "body",
