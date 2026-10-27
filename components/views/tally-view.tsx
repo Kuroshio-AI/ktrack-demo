@@ -3,6 +3,7 @@
 import { useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { flushSync } from "react-dom";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { AlertTriangle, ArrowRight, Check, ChevronRight, ClipboardList, FileText, Minus, Plus, Send, ShieldCheck, Trash2, X } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { RollingNumber } from "@/components/interior/value-flash";
@@ -217,7 +218,9 @@ function TallyGrid({ inspection, rows, disabled, onChange }: { inspection: Inspe
 export function TallyView() {
   const { state, update } = useApp();
   const tallies = state.inspections.filter((inspection) => inspection.joints && inspection.job && inspection.connection);
-  const [selectedId, setSelectedId] = useState<string | undefined>(() => (tallies.find((item) => item.status === "Draft" || item.status === "Returned") ?? tallies[0])?.id);
+  // The dashboard links here with ?sheet= to open one sheet; otherwise the first one still being worked on.
+  const searchParams = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | undefined>(() => (tallies.find((item) => item.id === searchParams.get("sheet")) ?? tallies.find((item) => item.status === "Draft" || item.status === "Returned") ?? tallies[0])?.id);
   const [creating, setCreating] = useState(false);
   const [report, setReport] = useState(false);
   // The summary numbers filter the grid. The rows are fixed when the filter is chosen, so fixing a pipe doesn't make it vanish mid-edit.

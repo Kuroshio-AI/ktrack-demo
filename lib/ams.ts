@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
-import { addDays, addMonthsClamped, approveInspection, createInitialState, deleteInspection, isDateString, makeId, nowIso, recalculateAlerts, rowToRecord, submitInspection, todayString, trimValue } from "./domain";
-import { connectionLabel, DAMAGE_OUTCOMES, limitFor, SAMPLE_CRITERIA, TALLY_COLUMNS, type TallyColumn } from "./tally";
+import { addDays, addMonthsClamped, approveInspection, createInitialState, dateDiffDays, deleteInspection, effectiveCertificateStatus, isDateString, makeId, nowIso, recalculateAlerts, rowToRecord, submitInspection, todayString, trimValue } from "./domain";
+import { calibrationStatus, connectionLabel, DAMAGE_OUTCOMES, limitFor, SAMPLE_CRITERIA, summarizeTally, TALLY_COLUMNS, type TallyColumn } from "./tally";
 import { formatDate } from "./utils";
 import type { Activity, AppState, ConnectionSpec, DamageOutcome, Equipment, ImportError, Inspection, Joint, Limit, Role, TallyJob } from "./types";
 
@@ -212,6 +212,43 @@ export function createTally(state: AppState, input: TallyInput, actor = state.ro
   const joints: Joint[] = Array.from({ length: input.joints }, (_, index) => ({ no: index + 1, values: {}, codes: {} }));
   const inspection: Inspection = { id: makeId("inspection"), assetId: record.id, inspector, title: TALLY_TITLE, checklist: [], connection: spec, job, joints, notes: "", status: "Draft", createdAt: timestamp, updatedAt: timestamp };
   return { state: { ...state, records: [...state.records, record], inspections: [inspection, ...state.inspections], activity: [activityEntry("Job opened", `${jobNo} · ${connectionLabel(spec)}`, actor, timestamp), ...state.activity] }, inspection };
+}
+
+// The dashboard's work queue, most urgent first: sheets returned for correction, expired instruments, sheets waiting for a
+// reviewer, sheets ready to submit, sheets still being measured, calibrations falling due and reports about to expire. Each
+// item links to the page where the work is done.
+export type WorkItem = { id: string; kind: "returned" | "expired" | "approval" | "submit" | "measure" | "calibration" | "report"; title: string; detail: string; href: string; badge: string; progress?: number };
+export function amsWorkQueue(state: AppState): WorkItem[] {
+  const ref = (inspection: Inspection) => state.records.find((record) => record.id === inspection.assetId)?.assetRef ?? "Job";
+  const tallies = state.inspections.filter((inspection) => inspection.joints && inspection.job && inspection.connection);
+  const open = tallies.filter((inspection) => inspection.status === "Draft" || inspection.status === "Returned");
+  const days = (count: number) => `${count} day${count === 1 ? "" : "s"}`;
+  const items: WorkItem[] = [];
+  for (const inspection of tallies.filter((item) => item.status === "Returned")) items.push({ id: inspection.id, kind: "returned", title: `${ref(inspection)} returned for correction`, detail: inspection.reviewerComment || "See the reviewer's note on the sheet.", href: `/inspections?sheet=${inspection.id}`, badge: "Correct" });
+  for (const item of (state.equipment ?? []).filter((equipment) => calibrationStatus(equipment, state.demoDate) === "Expired")) {
+    const blocked = open.filter((inspection) => inspection.job!.equipmentIds.includes(item.id)).length;
+    items.push({ id: item.id, kind: "expired", title: `${item.kind} ${item.serial} calibration expired`, detail: blocked ? `Blocks ${blocked} tally sheet${blocked === 1 ? "" : "s"} from being submitted` : `Expired ${formatDate(item.calibrationDue)}`, href: "/equipment", badge: `${days(-dateDiffDays(item.calibrationDue, state.demoDate))} over` });
+  }
+  for (const inspection of tallies.filter((item) => item.status === "Submitted")) {
+    const summary = summarizeTally(inspection.connection!, inspection.job!, inspection.joints!);
+    items.push({ id: inspection.id, kind: "approval", title: `${ref(inspection)} waiting for approval`, detail: `${summary.total} pipes · ${summary.downgraded.length} not accepted · by ${inspection.inspector}`, href: "/approvals", badge: "Review" });
+  }
+  const drafts = open.filter((inspection) => inspection.status === "Draft").map((inspection) => ({ inspection, summary: summarizeTally(inspection.connection!, inspection.job!, inspection.joints!) }));
+  for (const { inspection, summary } of drafts.filter((draft) => !draft.summary.pending)) items.push({ id: inspection.id, kind: "submit", title: `${ref(inspection)} ready to submit`, detail: `All ${summary.total} pipes graded · ${summary.downgraded.length} not accepted`, href: `/inspections?sheet=${inspection.id}`, badge: "Submit" });
+  for (const { inspection, summary } of drafts.filter((draft) => draft.summary.pending)) {
+    const graded = summary.total - summary.pending;
+    items.push({ id: inspection.id, kind: "measure", title: `${ref(inspection)}: ${summary.pending} of ${summary.total} pipes to measure`, detail: `${connectionLabel(inspection.connection!)} · ${inspection.inspector}`, href: `/inspections?sheet=${inspection.id}`, badge: `${Math.floor((graded / summary.total) * 100)}%`, progress: graded / summary.total });
+  }
+  for (const item of (state.equipment ?? []).filter((equipment) => calibrationStatus(equipment, state.demoDate) === "Due soon").sort((a, b) => a.calibrationDue.localeCompare(b.calibrationDue))) {
+    const left = dateDiffDays(item.calibrationDue, state.demoDate);
+    items.push({ id: item.id, kind: "calibration", title: `${item.kind} ${item.serial} calibration due`, detail: `Due ${formatDate(item.calibrationDue)}`, href: "/equipment", badge: left === 0 ? "Today" : `in ${days(left)}` });
+  }
+  for (const record of state.records) for (const certificate of record.certificates) {
+    const left = dateDiffDays(certificate.expiryDate, state.demoDate);
+    if ((certificate.status !== "Valid" && certificate.status !== "Expired") || left > 30) continue;
+    items.push({ id: certificate.id, kind: "report", title: `${certificate.number} ${effectiveCertificateStatus(certificate, state.demoDate) === "Expired" ? "has expired" : "expires soon"}`, detail: `${record.assetRef} · valid to ${formatDate(certificate.expiryDate)}`, href: "/certificates", badge: left < 0 ? `${days(-left)} over` : left === 0 ? "Today" : `in ${days(left)}` });
+  }
+  return items;
 }
 
 // A sheet's pipes follow the rack: one is added at the end, and only an empty last pipe comes off, so numbers never shift

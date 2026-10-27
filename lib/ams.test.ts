@@ -196,6 +196,20 @@ test("pipes are added at the end, only an empty last pipe comes off, and deletin
   assert.equal(ams.deleteTally(sample, issued.id), sample, "only a draft can be deleted");
 });
 
+test("the dashboard work queue lists what needs doing, most urgent first, each linked to where it's done", () => {
+  const state = ams.amsInitialState("2026-10-23");
+  const draft = state.inspections.find((item) => item.status === "Draft")!;
+  const queue = ams.amsWorkQueue(state);
+  assert.deepEqual(queue.map((item) => item.kind), ["measure", "calibration"]);
+  assert.deepEqual([queue[0].title, queue[0].href, queue[0].badge], ["WO-2026-0422: 3 of 40 pipes to measure", `/inspections?sheet=${draft.id}`, "92%"]);
+  const later = ams.amsWorkQueue({ ...state, demoDate: "2026-11-06" });
+  assert.deepEqual([later[0].kind, later[0].detail], ["expired", "Blocks 1 tally sheet from being submitted"], "an expired instrument comes first");
+  const as = (status: "Submitted" | "Returned") => ({ ...state, inspections: state.inspections.map((item) => item.id === draft.id ? { ...item, status, reviewerComment: "Re-measure pipe 7." } : item) });
+  assert.deepEqual(ams.amsWorkQueue(as("Submitted")).map((item) => item.kind), ["approval", "calibration"]);
+  assert.deepEqual(ams.amsWorkQueue(as("Returned")).map((item) => [item.kind, item.detail])[0], ["returned", "Re-measure pipe 7."]);
+  assert.ok(ams.amsWorkQueue({ ...state, demoDate: "2027-04-10" }).some((item) => item.kind === "report" && item.href === "/certificates"), "a report within 30 days of expiry");
+});
+
 test("damage criteria decide what a code does: changing one regrades open sheets but not issued reports", () => {
   const state = ams.amsInitialState("2026-10-23");
   const draft = (current: typeof state) => current.inspections.find((item) => item.status === "Draft")!;
