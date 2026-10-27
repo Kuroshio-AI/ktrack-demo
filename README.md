@@ -84,25 +84,25 @@ The provider template is versioned at [`docs/emailjs-template.html`](docs/emailj
 
 The WhatsApp action is a manual, one-alert operation. The browser posts a same-origin JSON allowlist to `/api/alerts/whatsapp` with `alertId`, `event`, `assetRef`, `site`, `severity` and `dueDate`. The browser derives those values from the selected alert and its matching local record, sends no owner, notes, evidence, contact list or arbitrary message body, and never chooses the recipient, phone number ID, template or Meta access token. Missing asset, site or due date values are sent as `Not applicable`.
 
-The server requires `META_WHATSAPP_ACCESS_TOKEN`, `META_WHATSAPP_PHONE_NUMBER_ID` and `META_WHATSAPP_TO`. Sending is deliberately unauthenticated: anyone using the public demo can send an alert, but only to the fixed recipients, with the guards below. `META_WHATSAPP_TO` holds one number or several separated by commas, and each alert goes to all of them. If only some numbers accept, the result stays unconfirmed so a retry can't message the others twice. `META_WHATSAPP_TEMPLATE_NAME` defaults to `kuroshio_alert`, `META_WHATSAPP_TEMPLATE_LANGUAGE` defaults to `en_US`, and `META_GRAPH_API_VERSION` defaults to `v26.0`. Keep all of these values in the server environment, never in browser code or the repository.
+The server requires `META_WHATSAPP_ACCESS_TOKEN`, `META_WHATSAPP_PHONE_NUMBER_ID` and `META_WHATSAPP_TO`. Sending is deliberately unauthenticated: anyone using the public demo can send an alert, but only to the fixed recipients, with the guards below. `META_WHATSAPP_TO` holds one number or several separated by commas, and each alert goes to all of them. If only some numbers accept, the result stays unconfirmed so a retry can't message the others twice. `META_WHATSAPP_TEMPLATE_NAME` defaults to `keetrack_asset_alert`, `META_WHATSAPP_TEMPLATE_LANGUAGE` defaults to `en_US`, and `META_GRAPH_API_VERSION` defaults to `v26.0`. Keep all of these values in the server environment, never in browser code or the repository.
 
 To replace an expired access token without a redeploy, connect Upstash for Redis from the Vercel Marketplace so the project has `KV_REST_API_URL` and `KV_REST_API_TOKEN`. Demo Controls then shows a **Meta access token** box. Anyone can submit it, but a token is saved only after Meta confirms it can use `META_WHATSAPP_PHONE_NUMBER_ID`, so only someone who already controls that number can change it. The saved token lives in Redis, overrides `META_WHATSAPP_ACCESS_TOKEN`, and is never returned to the browser.
 
 The approved template must have these five body text parameters in this exact order:
 
 ```text
-Kuroshio alert for your registered items.
+KTrack maintenance alert for your registered equipment.
 Event: {{1}}
-Item: {{2}}
-Location: {{3}}
+Asset: {{2}}
+Site: {{3}}
 Severity: {{4}}
-Date: {{5}}
-Please review this alert in your dashboard.
+Due date: {{5}}
+Please review this item in your KTrack register.
 ```
 
 The template name, language, parameter order and approved category are ultimately controlled by Meta. A successful response with a valid WhatsApp message ID means Meta accepted the API request; it does not confirm delivery. Network, timeout and malformed-provider responses remain unconfirmed and are cached so the browser does not automatically retry an ambiguous request. 4xx responses are redacted as provider rejection. Accepted and ambiguous results use a bounded warm-instance replay cache for 10 minutes, with a three-second per-instance cooldown and a maximum of 500 alert keys. These module-local guards are not full customer authentication or a durable global quota; cold starts and multiple instances can reset or bypass them. There are no scheduled, background or bulk sends.
 
-For production, complete the local Meta app and business onboarding/migration before deployment and use a separate production sender. Keep the user's existing WhatsApp Business phone app number outside this migration. The deployed Meta app must be published, have the WhatsApp Business Account connected, and subscribe to the `messages` field for webhook callbacks. Configure the fixed recipient and approved `kuroshio_alert` template in the production server environment.
+For production, complete the local Meta app and business onboarding/migration before deployment and use a separate production sender. Keep the user's existing WhatsApp Business phone app number outside this migration. The deployed Meta app must be published, have the WhatsApp Business Account connected, and subscribe to the `messages` field for webhook callbacks. Configure the fixed recipient and approved `keetrack_asset_alert` template in the production server environment.
 
 ## WhatsApp webhook
 
