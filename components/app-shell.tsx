@@ -89,7 +89,7 @@ const amsTitles: typeof titles = {
   equipment: { eyebrow: "Calibration", title: "Equipment", description: "Every inspection instrument with its last calibration and next due date. Record a calibration when the certificate comes back; an expired instrument stops a tally sheet being submitted." },
   alerts: { eyebrow: "Attention queue", title: "Alerts", description: "Tally sheets waiting for review or returned for correction, instruments due for calibration, and reports nearing their expiry." },
   sustainability: titles.sustainability,
-  "demo-controls": { eyebrow: "Scenario lab", title: "Demo Controls", description: "Move the demo date, back up this workspace or reset it to the sample jobs." },
+  "demo-controls": { eyebrow: "Scenario lab", title: "Demo Controls", description: "Load the client's dimension table, move the demo date, back up this workspace or reset it to the sample jobs." },
 };
 
 function View({ view }: { view: string }): ReactNode {
