@@ -16,7 +16,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ADDITIONAL_SERVICES, addPipe, createTally, deleteTally, INSPECTION_PROGRAM, isEmptyPipe, removeLastPipe, TALLY_TITLE } from "@/lib/ams";
 import { submitInspection, updateInspection } from "@/lib/domain";
-import { calibrationStatus, class2Text, CODES, connectionLabel, expiredEquipment, FINAL_CLASSES, gradePipe, inches, limitFailure, limitFor, limitText, readingText, reasons, SAMPLE_CRITERIA, summarizeTally, TALLY_COLUMNS, type Group, type TallyColumn } from "@/lib/tally";
+import { calibrationStatus, class2Text, CODES, connectionLabel, CONNECTION_STEPS, expiredEquipment, FINAL_CLASSES, gradePipe, inches, limitFailure, limitFor, limitText, pickConnection, readingText, reasons, SAMPLE_CRITERIA, summarizeTally, TALLY_COLUMNS, type Group, type TallyColumn } from "@/lib/tally";
 import type { AppState, FinalClass, Inspection, InspectionStatus, Joint, TallyJob } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -51,25 +51,36 @@ function applyCell(joint: Joint, cell: TallyColumn | "serial", text: string): Jo
   return value && !finalClass ? joint : { ...joint, finalClass };
 }
 
+// Named as on the F.582 header, so the form reads like the paper sheet.
+const STEP_LABEL: Record<(typeof CONNECTION_STEPS)[number], string> = { size: "Pipe OD", weight: "Weight lb/ft", connection: "Thread connection", grade: "Grade" };
+
 function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; onCancel: () => void }) {
   const { state, update } = useApp();
   const connections = state.connections ?? [];
   const [form, setForm] = useState({ jobNo: nextWorkOrder(state), customer: "Sample Drilling Co.", rig: "", well: "", location: "Musaffah yard", connectionId: connections[0]?.id ?? "", joints: "20", range: "R2", nominalWall: "0.362", serviceCategory: "Category 4", inspector: "Omar Saeed" });
   const [error, setError] = useState("");
   const set = (field: keyof typeof form) => (event: { target: { value: string } }) => setForm((current) => ({ ...current, [field]: event.target.value }));
+  const chosen = connections.find((spec) => spec.id === form.connectionId);
+  const picked = pickConnection(connections, chosen ?? {});
+  const choose = (field: (typeof CONNECTION_STEPS)[number], value: string) => { const spec = pickConnection(connections, { ...chosen, [field]: value }).spec; if (spec) setForm((current) => ({ ...current, connectionId: spec.id })); };
   function create() {
     try {
-      const result = createTally(state, { ...form, joints: Number(form.joints), nominalWall: Number(form.nominalWall) });
+      const result = createTally(state, { ...form, connectionId: picked.spec?.id ?? "", joints: Number(form.joints), nominalWall: Number(form.nominalWall) });
       if (update(() => result.state)) onCreated(result.inspection.id);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The tally sheet could not be opened."); }
   }
-  // A 12-column grid: the two pickers take half each, the job fields a quarter, and the six short fields a sixth, so no label wraps.
+  // A 12-column grid: the report format a third and the four pipe fields the rest, the job fields a quarter, and the six short
+  // fields a sixth, so no label wraps.
   const field = (id: keyof typeof form, label: string, span: string, props: Record<string, unknown> = {}) => <div className={span}><label className="eyebrow" htmlFor={`tally-${id}`}>{label}</label><Input id={`tally-${id}`} className="mt-1.5" value={form[id]} onChange={set(id)} {...props} /></div>;
   const pick = (id: keyof typeof form, label: string, span: string, options: string[]) => <div className={span}><label className="eyebrow" htmlFor={`tally-${id}`}>{label}</label><Select id={`tally-${id}`} className="mt-1.5" value={form[id]} onChange={set(id)}>{options.map((option) => <option key={option}>{option}</option>)}</Select></div>;
   return <div className="animate-rise mt-4 rounded-xl border border-[#e9c9ae] bg-[#fffaf5] p-4">
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-12">
-      <div className="sm:col-span-2 xl:col-span-6"><label className="eyebrow" htmlFor="tally-format">Report format</label><Select id="tally-format" className="mt-1.5" defaultValue="f582"><option value="f582">F.582 drill pipe tally sheet → F.581 summary report</option><option disabled>Your other report formats</option></Select></div>
-      <div className="sm:col-span-2 xl:col-span-6"><label className="eyebrow" htmlFor="tally-connectionId">Pipe and thread connection</label><Select id="tally-connectionId" className="mt-1.5" value={form.connectionId} onChange={set("connectionId")}>{connections.length ? connections.map((spec) => <option key={spec.id} value={spec.id}>{connectionLabel(spec)}{spec.sample ? " · sample limits" : ""}</option>) : <option value="">Import a dimension table first</option>}</Select></div>
+      <div className="sm:col-span-2 xl:col-span-4"><label className="eyebrow" htmlFor="tally-format">Report format</label><Select id="tally-format" className="mt-1.5" defaultValue="f582"><option value="f582">F.582 tally sheet → F.581 summary report</option><option disabled>Your other report formats</option></Select></div>
+      {picked.spec ? <fieldset className="grid min-w-0 grid-cols-2 items-end gap-4 sm:col-span-2 sm:grid-cols-4 xl:col-span-8">
+        <legend className="sr-only">Pipe and thread connection</legend>
+        {picked.steps.map(({ field, options, value }) => <div key={field}><label className="eyebrow" htmlFor={`tally-${field}`}>{STEP_LABEL[field]}</label><Select id={`tally-${field}`} className="mt-1.5" value={value} onChange={(event) => choose(field, event.target.value)}>{options.map((option) => <option key={option} value={option}>{field === "size" ? `${option}"` : option}</option>)}</Select></div>)}
+        <p className="col-span-full -mt-2 text-xs text-slate-500">{picked.spec.sample ? "Sample limits, not DS-1 or API values." : `Limits from ${picked.spec.standard ?? "DS-1"}.`} Grade can&apos;t be measured, so match it to the stamp on the pin.</p>
+      </fieldset> : <div className="sm:col-span-2 xl:col-span-8"><label className="eyebrow" htmlFor="tally-connection">Pipe and thread connection</label><Select id="tally-connection" className="mt-1.5" disabled><option>Import a dimension table first</option></Select></div>}
       {field("jobNo", "Work order", "xl:col-span-3")}
       {field("customer", "Customer", "xl:col-span-3")}
       {field("rig", "Rig", "xl:col-span-3", { placeholder: "Rig SD-09" })}

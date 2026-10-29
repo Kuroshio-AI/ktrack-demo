@@ -157,6 +157,21 @@ export const class2Text = (limit: Limit) => {
 
 export const connectionLabel = (spec: Pick<ConnectionSpec, "size" | "weight" | "connection" | "grade">) => `${spec.size}" ${spec.weight} ${spec.connection} grade ${spec.grade}`;
 
+// The new tally form picks a row one F.582 header field at a time. A field keeps the wanted value while a row has it, else
+// takes the first that does, so changing the size keeps the grade if the new size comes in that grade.
+export const CONNECTION_STEPS = ["size", "weight", "connection", "grade"] as const;
+export function pickConnection(specs: ConnectionSpec[], want: Partial<Pick<ConnectionSpec, (typeof CONNECTION_STEPS)[number]>>) {
+  let rows = specs;
+  const steps = CONNECTION_STEPS.map((field) => {
+    const options = [...new Set(rows.map((spec) => spec[field]))];
+    if (field === "size" || field === "weight") options.sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+    const value = options.includes(want[field] ?? "") ? want[field]! : options[0];
+    rows = rows.filter((spec) => spec[field] === value);
+    return { field, options, value };
+  });
+  return { steps, spec: rows[0] as ConnectionSpec | undefined };
+}
+
 // The F.581 results table: one row per class, each split by where rework is needed and what was repaired in the field.
 export type ResultRow = { label: string; count: number; rework: Record<Side, number>; repaired: Record<"box" | "pin" | "other", number> };
 export type TallySummary = { total: number; pending: number; accepted: number; rows: ResultRow[]; downgraded: { joint: Joint; graded: Graded }[] };
