@@ -52,8 +52,11 @@ export function CertificatesView() {
   async function makeQr(record: AssetRecord, certificate: Certificate): Promise<QrSnapshot | undefined> {
     setError(""); setBusy(certificate.id);
     const payload = snapshot(record, certificate, state.demoDate);
+    // One key per certificate, saved with it, so a later revoke reaches every QR made for it.
+    const statusKey = certificate.statusKey ?? crypto.randomUUID();
+    if (!certificate.statusKey && !update((current) => ({ ...current, records: current.records.map((item) => item.id === record.id ? { ...item, certificates: item.certificates.map((cert) => cert.id === certificate.id ? { ...cert, statusKey: cert.statusKey ?? statusKey } : cert) } : item) }))) { setBusy(undefined); return; }
     try {
-      const { image, url } = await qrFor(payload);
+      const { image, url } = await qrFor({ ...payload, statusKey });
       const latestRecord = currentState.current.records.find((item) => item.id === record.id);
       const latestCertificate = latestRecord?.certificates.find((item) => item.id === certificate.id);
       if (!latestRecord || !latestCertificate || JSON.stringify(payload) !== JSON.stringify(snapshot(latestRecord, latestCertificate, currentState.current.demoDate))) throw new Error("Certificate changed while generating this QR. Please try again.");
@@ -117,7 +120,7 @@ export function CertificatesView() {
       <div className="eyebrow">{opened.record.assetRef} · Scan to verify</div>
       <h2 id="qr-title" className="mt-1 break-all text-lg font-bold text-navy">{opened.certificate.number}</h2>
       <img src={shown.image} alt={`QR code for ${opened.certificate.number}`} className="mx-auto mt-3 size-64" />
-      <p className="text-xs leading-relaxed text-slate-500">Signed demo snapshot: {effectiveCertificateStatus(opened.certificate, state.demoDate)}. Expires in 24 hours. Old links keep their original status until expiry.</p>
+      <p className="text-xs leading-relaxed text-slate-500">Status now: {effectiveCertificateStatus(opened.certificate, state.demoDate)}. If this {IS_AMS ? "report" : "certificate"} is revoked, the QR shows it, even on a printed copy. The link works for 24 hours.</p>
       {error && <p className="mt-3 rounded-lg bg-[#fff3f3] p-2 text-xs text-danger" role="alert">{error}</p>}
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         <Button asChild size="sm"><a href={shown.url} target="_blank" rel="noreferrer"><ExternalLink />Open verification</a></Button>
@@ -139,7 +142,7 @@ export function CertificatesView() {
           <div className="shrink-0 text-center"><img src={printing.qr} alt="Certificate verification QR" className="mx-auto size-36" /><div className="eyebrow mt-1">Scan to verify</div></div>
           <div className="grid flex-1 gap-8 sm:grid-cols-2"><Signature label="Inspected by" name={printing.inspector ?? "Not recorded"} date={printing.inspectedAt} image={printing.inspectorSignature} /><Signature label="Approved by" name="Authorised reviewer" date={printing.approvedAt} /></div>
         </div>
-        <p className="mt-6 border-t border-line pt-4 text-xs leading-relaxed text-slate-500">Demo certificate · fictional data. QR verification is a signed snapshot valid for 24 hours; it is not live certification.</p>
+        <p className="mt-6 border-t border-line pt-4 text-xs leading-relaxed text-slate-500">Demo certificate · fictional data. The QR shows this certificate&apos;s current status for 24 hours.</p>
       </div></div>}
     </dialog>, document.body)}
   </div>;

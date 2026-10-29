@@ -59,6 +59,8 @@ export type Certificate = {
   result: "Pass" | "Fail";
   status: CertificateStatus;
   sourceInspectionId?: string;
+  // Random, kept only in this browser: proves to the server that a revoke comes from whoever created the QR.
+  statusKey?: string;
   token?: string;
   verifyUrl?: string;
   tokenIssuedAt?: string;

@@ -19,6 +19,18 @@ type AppContextValue = {
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+// QR codes read the status live, so a certificate that has had one tells the server when it is revoked or superseded.
+async function publishStatusChanges(before: AppState, after: AppState): Promise<void> {
+  const previous = new Map(before.records.flatMap((record) => record.certificates).map((certificate) => [certificate.id, certificate.status]));
+  const changed = after.records.flatMap((record) => record.certificates).filter((certificate) => certificate.statusKey && certificate.status !== previous.get(certificate.id) && (certificate.status === "Revoked" || certificate.status === "Superseded"));
+  const failed: string[] = [];
+  await Promise.all(changed.map(async (certificate) => {
+    const response = await fetch("/api/certificates/status", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ statusKey: certificate.statusKey, status: certificate.status }) }).catch(() => undefined);
+    if (!response?.ok) failed.push(certificate.number);
+  }));
+  if (failed.length) throw new Error(`${failed.join(", ")} changed here, but QR codes already printed for ${failed.length === 1 ? "it" : "them"} still show the old status.`);
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(() => createInitialState(todayString()));
   const latestState = useRef(state);
@@ -44,6 +56,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const result = commitState(window.localStorage, next);
       if (!result.ok) { setSaveError(result.error); return false; }
       setSaveError(undefined);
+      publishStatusChanges(latestState.current, next).catch((error: Error) => setSaveError(error.message));
       latestState.current = next;
       setState(next);
       return true;

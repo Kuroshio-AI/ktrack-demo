@@ -27,7 +27,7 @@ npm run build
 1. Start on Dashboard. Open **Demo Controls** to download **Filled sample 1** for inspections and approvals or **Filled sample 2** for renewals and retirement, then upload it in **Import**. You can preview either sample from its link; both use the visible demo date, contain six records and have no inspection history until you create it through the workflow.
 2. Review the six valid rows and click **Import valid rows**. Open Dashboard to see the 30-day, 7-day, today and overdue queues.
 3. Open Inspections, choose an active record, complete the checklist and submit it. A Reviewer or Admin can return it with a mandatory comment, or issue a certificate with an explicit expiry.
-4. Open Certificates to print a branded DEMO certificate, create a QR snapshot and open the public `/verify?token=...` page. Tokens are signed, immutable payloads with a 24-hour TTL.
+4. Open Certificates to print a branded DEMO certificate, create a QR and open the public `/verify?token=...` page. Tokens are signed payloads with a 24-hour TTL; revoking the certificate afterwards changes what every earlier QR shows.
 5. On Alerts, an Admin, Engineer or Reviewer can click **Send email** on one alert. The EmailJS template has fixed To `devops@kuroshioai.com` and CC `noufal@kuroshioai.com`; KTrack sends only when you click and has no automatic or bulk send action.
 6. Open **Demo Controls → WhatsApp Cloud API** to check the server-selected template and masked recipient. On Alerts, click **Send WhatsApp alert** on one alert. KTrack sends only the five approved alert details and records local API acceptance; delivery remains unconfirmed.
 7. Use Demo Controls to download blank templates, set the app-only date, exercise deadline tiers, submit an explicit all-pass scenario, or reset the demo after confirmation. Reset returns to the empty Dashboard.
@@ -70,7 +70,9 @@ Inspection evidence is optional fictional demo data. Only image MIME types are a
 
 ## Verification snapshots
 
-Creating a QR calls `POST /api/certificates/demo-token` with a small allowlisted certificate snapshot. The API signs it with an HMAC secret and returns a verification URL. `/verify?token=...` displays the captured status, dates and `asOf` timestamp; it is not a live certificate lookup. Old tokens remain valid until their own expiry even if a certificate is later revoked or superseded. QR generation can be retried without changing the approved certificate.
+Creating a QR calls `POST /api/certificates/demo-token` with a small allowlisted certificate snapshot. The API signs it with an HMAC secret and returns a verification URL. `/verify?token=...` displays the status, dates and the time it was checked. QR generation can be retried without changing the approved certificate.
+
+Revoked and superseded certificates show on QR codes made before the change. The first QR for a certificate gives it a random `statusKey`, kept only in that browser, and the token carries an HMAC of it (`statusId`). When the certificate is revoked or superseded, the browser posts the key to `POST /api/certificates/status`, which stores the new status in the Upstash Redis store (`KV_REST_API_*`) under the `statusId` for 24 hours, the longest a token lives. The verify page reads it there and says "live status checked". Only the status id and the status go to Redis. Without Redis, or if it can't be reached, the page shows the signed snapshot and says so.
 
 Future integrations such as a database, automated outbound delivery, customer identity and real certification evidence are intentionally outside this demo.
 

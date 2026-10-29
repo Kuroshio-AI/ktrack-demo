@@ -1,6 +1,6 @@
 import { ShieldAlert, ShieldCheck, ShieldMinus, ShieldX } from "lucide-react";
 import { AMS_NAME, IS_AMS } from "@/lib/client";
-import { verifyDemoToken } from "@/lib/tokens";
+import { verifyLiveToken } from "@/lib/tokens";
 import type { CertificateStatus } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -29,7 +29,8 @@ const WARRANTY: Partial<Record<CertificateStatus, { title: string; detail: strin
 
 export default async function VerifyPage({ searchParams }: { searchParams: Promise<{ token?: string | string[] }> }) {
   const { token } = await searchParams;
-  const result = typeof token === "string" ? verifyDemoToken(token, process.env.DEMO_CERT_TOKEN_SECRET ?? "") : { ok: false as const, error: "No token supplied" };
+  const result = typeof token === "string" ? await verifyLiveToken(token, process.env.DEMO_CERT_TOKEN_SECRET ?? "") : { ok: false as const, error: "No token supplied" };
+  const checked = result.ok ? result.checkedAt ?? result.snapshot.asOf : "";
   const warranty = result.ok && result.snapshot.kind === "warranty";
   const tone = result.ok ? { ...STATUS[result.snapshot.status], ...(warranty ? WARRANTY[result.snapshot.status] : IS_AMS ? REPORT[result.snapshot.status] : {}) } : { icon: ShieldX, badge: "bg-danger", band: "bg-[#fff5f5]", title: "Cannot verify", detail: result.error };
   const Icon = tone.icon;
@@ -49,8 +50,8 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
           <div><dt className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">{warranty ? "Warranty date" : "Issued"}</dt><dd className="mt-1 font-semibold text-[#0b3151]">{formatDate(result.snapshot.issuedDate)}</dd></div>
           <div><dt className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">{warranty || IS_AMS ? "Valid until" : "Expires"}</dt><dd className="mt-1 font-semibold text-[#0b3151]">{formatDate(result.snapshot.expiryDate)}</dd></div>
         </dl>
-        {/* Rendered on the server, so the snapshot time is stated in UTC rather than guessing the viewer's zone. */}
-        <p className="mt-6 border-t border-[#e1e9ee] pt-4 text-xs leading-relaxed text-slate-500">Demo {warranty ? "warranty" : IS_AMS ? "report" : "certificate"} · status as of {formatDate(result.snapshot.asOf.slice(0, 10))}, {result.snapshot.asOf.slice(11, 16)} UTC. This is a signed snapshot, not live certification.</p>
+        {/* Rendered on the server, so the time is stated in UTC rather than guessing the viewer's zone. */}
+        <p className="mt-6 border-t border-[#e1e9ee] pt-4 text-xs leading-relaxed text-slate-500">Demo {warranty ? "warranty" : IS_AMS ? "report" : "certificate"} · {result.checkedAt ? "live status checked" : "status as of"} {formatDate(checked.slice(0, 10))}, {checked.slice(11, 16)} UTC.{!result.checkedAt && " This is a signed snapshot, not live certification."}</p>
       </div>}
     </div>
   </main>;

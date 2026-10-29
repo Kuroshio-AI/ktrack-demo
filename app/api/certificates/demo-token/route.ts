@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isDateString } from "@/lib/domain";
-import { createDemoToken } from "@/lib/tokens";
+import { uuidPattern } from "@/lib/field";
+import { createDemoToken, statusIdFor } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 
@@ -23,11 +24,12 @@ export async function POST(request: Request) {
   const candidate = body as Record<string, unknown>;
   const fields = ["certificateNo", "assetRef", "assetType", "issuedDate", "expiryDate"];
   if (!fields.every((field) => isSafeText(candidate[field])) || !datePattern.test(candidate.issuedDate as string) || !datePattern.test(candidate.expiryDate as string) || !isDateString(candidate.issuedDate) || !isDateString(candidate.expiryDate) || candidate.expiryDate < candidate.issuedDate || !statuses.has(candidate.status as string)
-    || (candidate.kind !== undefined && (candidate.kind !== "warranty" || !["Valid", "Expired", "Revoked"].includes(candidate.status as string)))) return NextResponse.json({ error: "Snapshot contains invalid fields" }, { status: 400 });
+    || (candidate.kind !== undefined && (candidate.kind !== "warranty" || !["Valid", "Expired", "Revoked"].includes(candidate.status as string)))
+    || (candidate.statusKey !== undefined && (typeof candidate.statusKey !== "string" || !uuidPattern.test(candidate.statusKey)))) return NextResponse.json({ error: "Snapshot contains invalid fields" }, { status: 400 });
   const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
   let origin: string;
   try { const url = new URL(configuredUrl || request.url); if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("protocol"); origin = url.origin; } catch { return NextResponse.json({ error: "NEXT_PUBLIC_APP_URL is invalid" }, { status: 500 }); }
-  const snapshot = { certificateNo: candidate.certificateNo as string, assetRef: candidate.assetRef as string, assetType: candidate.assetType as string, issuedDate: candidate.issuedDate as string, expiryDate: candidate.expiryDate as string, status: candidate.status as "Valid" | "Expired" | "Revoked" | "Superseded", asOf: new Date().toISOString(), ...(candidate.kind === "warranty" ? { kind: "warranty" as const } : {}) };
+  const snapshot = { certificateNo: candidate.certificateNo as string, assetRef: candidate.assetRef as string, assetType: candidate.assetType as string, issuedDate: candidate.issuedDate as string, expiryDate: candidate.expiryDate as string, status: candidate.status as "Valid" | "Expired" | "Revoked" | "Superseded", asOf: new Date().toISOString(), ...(candidate.kind === "warranty" ? { kind: "warranty" as const } : {}), ...(typeof candidate.statusKey === "string" ? { statusId: statusIdFor(candidate.statusKey, secret) } : {}) };
   const token = createDemoToken(snapshot, secret);
   return NextResponse.json({ token, verifyUrl: `${origin}/verify?token=${encodeURIComponent(token)}` }, { headers: { "Cache-Control": "no-store" } });
 }
