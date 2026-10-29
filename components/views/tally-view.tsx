@@ -51,8 +51,9 @@ function applyCell(joint: Joint, cell: TallyColumn | "serial", text: string): Jo
   return value && !finalClass ? joint : { ...joint, finalClass };
 }
 
-// Named as on the F.582 header, so the form reads like the paper sheet.
-const STEP_LABEL: Record<(typeof CONNECTION_STEPS)[number], string> = { size: "Pipe OD", weight: "Weight lb/ft", connection: "Thread connection", grade: "Grade" };
+// Named as on the F.582 header, so the form reads like the paper sheet, except "Thread connection", which wraps in a
+// quarter of the row at 1280px and drops its select below the others.
+const STEP_LABEL: Record<(typeof CONNECTION_STEPS)[number], string> = { size: "Pipe OD", weight: "Weight lb/ft", connection: "Connection", grade: "Grade" };
 
 function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; onCancel: () => void }) {
   const { state, update } = useApp();
@@ -75,7 +76,7 @@ function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; on
   const pick = (id: keyof typeof form, label: string, span: string, options: string[]) => <div className={span}><label className="eyebrow" htmlFor={`tally-${id}`}>{label}</label><Select id={`tally-${id}`} className="mt-1.5" value={form[id]} onChange={set(id)}>{options.map((option) => <option key={option}>{option}</option>)}</Select></div>;
   return <div className="animate-rise mt-4 rounded-xl border border-[#e9c9ae] bg-[#fffaf5] p-4">
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-12">
-      <div className="sm:col-span-2 xl:col-span-4"><label className="eyebrow" htmlFor="tally-format">Report format</label><Select id="tally-format" className="mt-1.5" defaultValue="f582"><option value="f582">F.582 tally sheet → F.581 summary report</option><option disabled>Your other report formats</option></Select></div>
+      <div className="sm:col-span-2 xl:col-span-4"><label className="eyebrow" htmlFor="tally-format">Report format</label><Select id="tally-format" className="mt-1.5" defaultValue="f582"><option value="f582">F.582 tally sheet → F.581 report</option><option disabled>Your other report formats</option></Select></div>
       {picked.spec ? <fieldset className="grid min-w-0 grid-cols-2 items-end gap-4 sm:col-span-2 sm:grid-cols-4 xl:col-span-8">
         <legend className="sr-only">Pipe and thread connection</legend>
         {picked.steps.map(({ field, options, value }) => <div key={field}><label className="eyebrow" htmlFor={`tally-${field}`}>{STEP_LABEL[field]}</label><Select id={`tally-${field}`} className="mt-1.5" value={value} onChange={(event) => choose(field, event.target.value)}>{options.map((option) => <option key={option} value={option}>{field === "size" ? `${option}"` : option}</option>)}</Select></div>)}
