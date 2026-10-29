@@ -201,7 +201,7 @@ test("the dashboard work queue lists what needs doing, most urgent first, each l
   const draft = state.inspections.find((item) => item.status === "Draft")!;
   const queue = ams.amsWorkQueue(state);
   assert.deepEqual(queue.map((item) => item.kind), ["measure", "calibration"]);
-  assert.deepEqual([queue[0].title, queue[0].href, queue[0].badge], ["WO-2026-0422: 3 of 40 pipes to measure", `/inspections?sheet=${draft.id}`, "92%"]);
+  assert.deepEqual([queue[0].title, queue[0].href, queue[0].badge], ["WO-2026-0422: 2 of 40 pipes to measure", `/inspections?sheet=${draft.id}`, "95%"]);
   const later = ams.amsWorkQueue({ ...state, demoDate: "2026-11-06" });
   assert.deepEqual([later[0].kind, later[0].detail], ["expired", "Blocks 1 tally sheet from being submitted"], "an expired instrument comes first");
   const as = (status: "Submitted" | "Returned") => ({ ...state, inspections: state.inspections.map((item) => item.id === draft.id ? { ...item, status, reviewerComment: "Re-measure pipe 7." } : item) });
@@ -237,7 +237,7 @@ test("a new browser opens on the sample jobs, and that workspace survives a save
   const draft = state.inspections.find((item) => item.status === "Draft")!;
   const summary = ams.summarizeTally(draft.connection!, draft.job!, draft.joints!);
   const count = (label: string) => summary.rows.find((row) => row.label === label)!.count;
-  assert.deepEqual([summary.accepted, summary.pending, count("Premium-Rework"), count("Class-2"), count("Bent"), count("Scrap"), count("ID coating cond. 3 & 4")], [30, 3, 3, 2, 1, 1, 1]);
+  assert.deepEqual([summary.accepted, summary.pending, count("Premium-Rework"), count("Class-2"), count("Bent"), count("Scrap"), count("ID coating cond. 3 & 4")], [31, 2, 3, 2, 1, 1, 1]);
   assert.ok(state.alerts.some((alert) => alert.event === "Calibration due" && alert.assetRef?.startsWith("Lead gauge")));
   assert.equal(ams.loadState(undefined, "2026-10-23").state.inspections.length, 2);
 });

@@ -363,7 +363,7 @@ function samplePipes(spec: ConnectionSpec, nominalWall: number, count: number, f
 // 5" 19.50 lb/ft drill pipe has a 0.362 inch nominal wall.
 const NOMINAL_WALL = 0.362;
 
-// The shared demo link opens on this: the sample table and instruments, one issued report, and one tally sheet with three
+// The shared demo link opens on this: the sample table and instruments, one issued report, and one tally sheet with two
 // pipes still missing their box OD and tong space for the presenter to fill in.
 export function amsInitialState(demoDate = todayString(), timestamp = nowIso()): AppState {
   let state: AppState = { ...createInitialState(demoDate), connections: SAMPLE_CONNECTIONS, equipment: sampleEquipment(demoDate), criteria: SAMPLE_CRITERIA };
@@ -380,7 +380,7 @@ export function amsInitialState(demoDate = todayString(), timestamp = nowIso()):
     samplePipes(SAMPLE_CONNECTIONS[1], NOMINAL_WALL, 40, {
       7: [["past", "boxTong", "min", 0.06]], 12: [["code", "boxCond", "TD"]], 15: [["code", "boxCond", "RFD"]], 19: [["past", "boxOd", "min", 0.035]],
       23: [["value", "remWall", 0.27]], 28: [["past", "pinBevel", "max", 0.02]], 31: [["code", "odCond", "BENT"]], 33: [["code", "boxMpi", "CRK"]], 35: [["coating", 3]],
-      38: [["blank", ["boxOd", "boxTong"]]], 39: [["blank", ["boxOd", "boxTong"]]], 40: [["blank", ["boxOd", "boxTong"]]],
+      39: [["blank", ["boxOd", "boxTong"]]], 40: [["blank", ["boxOd", "boxTong"]]],
     }, "SD07"));
   return recalculateAlerts({ ...state, role: "Admin" }, timestamp);
 }
