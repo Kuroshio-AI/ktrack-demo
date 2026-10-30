@@ -42,6 +42,7 @@ test("return, resubmit and approve are guarded and approval is idempotent", () =
   assert.equal(issued.inspections[0].status, "Issued");
   assert.equal(issued.records[0].certificates.length, 1);
   assert.equal(approveInspection(issued, created.inspection.id, "2027-02-15").records[0].certificates.length, 1);
+  assert.equal(approveInspection(resubmitted, created.inspection.id, "2027-02-15", "Reviewer", "2026-02-17T00:00:00.000Z", 42).records[0].certificates[0].number, "CERT-20260215-0042", "the trial's server-given sequence");
   assert.equal(issued.records[0].licenceExpiryDate, "2027-01-10");
   assert.equal(issued.records[0].retirementDueDate, "2028-01-10");
   assert.equal(issued.records[0].inspectionDueDate, addMonthsClamped("2026-02-15", 1));

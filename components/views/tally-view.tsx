@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ADDITIONAL_SERVICES, addPipe, createTally, deleteTally, INSPECTION_PROGRAM, isEmptyPipe, removeLastPipe, TALLY_TITLE } from "@/lib/ams";
+import { IS_TRIAL } from "@/lib/client";
 import { submitInspection, updateInspection } from "@/lib/domain";
 import { calibrationStatus, class2Text, CODES, connectionLabel, CONNECTION_STEPS, expiredEquipment, FINAL_CLASSES, gradePipe, inches, limitFailure, limitFor, limitText, pickConnection, readingText, reasons, SAMPLE_CRITERIA, summarizeTally, TALLY_COLUMNS, type Group, type TallyColumn } from "@/lib/tally";
 import type { AppState, FinalClass, Inspection, InspectionStatus, Joint, TallyJob } from "@/lib/types";
@@ -28,6 +29,14 @@ function nextWorkOrder(state: AppState): string {
   const year = state.demoDate.slice(0, 4);
   const last = Math.max(0, ...state.records.map((record) => Number(new RegExp(`^WO-${year}-(\\d+)$`).exec(record.assetRef)?.[1] ?? 0)));
   return `WO-${year}-${String(last + 1).padStart(4, "0")}`;
+}
+
+// The dimension table doesn't carry the nominal wall, so a new sheet takes the one last used for that pipe size and weight,
+// and a size not seen before starts blank rather than with another size's wall.
+function lastWall(state: AppState, spec?: { size: string; weight: string }): string {
+  const used = spec && state.inspections.filter((item) => item.job && item.connection?.size === spec.size && item.connection.weight === spec.weight)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  return used?.job ? String(used.job.nominalWall) : "";
 }
 
 // One typed or pasted cell. A blank clears it; anything that doesn't read as that column's kind leaves the pipe as it was.
@@ -57,14 +66,18 @@ function applyCell(joint: Joint, cell: TallyColumn | "serial", text: string): Jo
 const STEP_LABEL: Record<(typeof CONNECTION_STEPS)[number], string> = { size: "Pipe OD", weight: "Weight lb/ft", connection: "Connection", grade: "Grade" };
 
 function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; onCancel: () => void }) {
-  const { state, update } = useApp();
+  const { state, update, user } = useApp();
   const connections = state.connections ?? [];
-  const [form, setForm] = useState({ jobNo: nextWorkOrder(state), customer: "Sample Drilling Co.", rig: "", well: "", location: "Musaffah yard", connectionId: connections[0]?.id ?? "", joints: "20", range: "R2", nominalWall: "0.362", serviceCategory: "Category 4", inspector: "Omar Saeed" });
+  // The demo opens on its sample job; real work starts blank, as the signed-in inspector.
+  const [form, setForm] = useState({ jobNo: nextWorkOrder(state), customer: IS_TRIAL ? "" : "Sample Drilling Co.", rig: "", well: "", location: IS_TRIAL ? "" : "Musaffah yard", connectionId: connections[0]?.id ?? "", joints: "20", range: "R2", nominalWall: lastWall(state, connections[0]), serviceCategory: "Category 4", inspector: user?.name ?? (IS_TRIAL ? "" : "Omar Saeed") });
   const [error, setError] = useState("");
   const set = (field: keyof typeof form) => (event: { target: { value: string } }) => setForm((current) => ({ ...current, [field]: event.target.value }));
   const chosen = connections.find((spec) => spec.id === form.connectionId);
   const picked = pickConnection(connections, chosen ?? {});
-  const choose = (field: (typeof CONNECTION_STEPS)[number], value: string) => { const spec = pickConnection(connections, { ...chosen, [field]: value }).spec; if (spec) setForm((current) => ({ ...current, connectionId: spec.id })); };
+  const choose = (field: (typeof CONNECTION_STEPS)[number], value: string) => { const spec = pickConnection(connections, { ...chosen, [field]: value }).spec; if (spec) setForm((current) => ({ ...current, connectionId: spec.id, nominalWall: spec.size === chosen?.size && spec.weight === chosen.weight ? current.nominalWall : lastWall(state, spec) })); };
+  const customers = [...new Set(state.records.map((record) => record.owner.trim()).filter(Boolean))].sort();
+  // A real sheet is graded with the client's own damage criteria, so none opens while any are still the sample wording.
+  const sampleCriteria = IS_TRIAL && (state.criteria ?? SAMPLE_CRITERIA).some((item) => item.sample);
   function create() {
     try {
       const result = createTally(state, { ...form, connectionId: picked.spec?.id ?? "", joints: Number(form.joints), nominalWall: Number(form.nominalWall) });
@@ -84,18 +97,20 @@ function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; on
         <p className="col-span-full -mt-2 text-xs text-slate-500">{picked.spec.sample ? "Sample limits, not DS-1 or API values." : `Limits from ${picked.spec.standard ?? "DS-1"}.`} Grade can&apos;t be measured, so match it to the stamp on the pin.</p>
       </fieldset> : <div className="sm:col-span-2 xl:col-span-8"><label className="eyebrow" htmlFor="tally-connection">Pipe and thread connection</label><Select id="tally-connection" className="mt-1.5" disabled><option>Import a dimension table first</option></Select></div>}
       {field("jobNo", "Work order", "xl:col-span-3")}
-      {field("customer", "Customer", "xl:col-span-3")}
+      {field("customer", "Customer", "xl:col-span-3", { list: "tally-customers", autoComplete: "off", placeholder: "As on their KTrack account…" })}
+      <datalist id="tally-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
       {field("rig", "Rig", "xl:col-span-3", { placeholder: "Rig SD-09" })}
       {field("well", "Well no.", "xl:col-span-3", { placeholder: "SD-09-01" })}
-      {field("location", "Location", "xl:col-span-2")}
+      {field("location", "Location", "xl:col-span-2", { placeholder: "Musaffah yard…" })}
       {field("joints", "Pipes", "xl:col-span-2", { type: "number", min: 1, max: 500 })}
       {pick("range", "Range", "xl:col-span-2", ["R1", "R2", "R3"])}
       {field("nominalWall", "Nom. wall (in)", "xl:col-span-2", { inputMode: "decimal" })}
       {pick("serviceCategory", "Service cat.", "xl:col-span-2", ["Category 1", "Category 2", "Category 3", "Category 4", "Category 5"])}
       {field("inspector", "Inspector", "xl:col-span-2")}
     </div>
+    {sampleCriteria && <p className="mt-3 text-sm text-danger" role="alert">The damage criteria are still KTrack&apos;s sample wording. An Admin or Manager replaces or confirms them on <Link href="/criteria" className="font-semibold underline">Damage criteria</Link> before the first tally sheet.</p>}
     {error && <p className="mt-3 text-sm text-danger" role="alert">{error}</p>}
-    <div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={onCancel}>Cancel</Button><Button className="press" onClick={create} disabled={!connections.length}><Plus data-icon="inline-start" />Open tally sheet</Button></div>
+    <div className="mt-4 flex justify-end gap-2"><Button variant="ghost" onClick={onCancel}>Cancel</Button><Button className="press" onClick={create} disabled={!connections.length || sampleCriteria}><Plus data-icon="inline-start" />Open tally sheet</Button></div>
   </div>;
 }
 

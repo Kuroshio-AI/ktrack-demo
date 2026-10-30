@@ -67,6 +67,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [lastSync, setLastSync] = useState<{ count: number; at: number }>();
   const flushing = useRef(false);
   const syncing = useRef(false);
+  // Set when this laptop's saved records couldn't be read. Its waiting changes would then go up as removals, deleting
+  // the server's copies, so nothing syncs until the records are recovered.
+  const unreadable = useRef(false);
   const updateRef = useRef<(updater: (current: AppState) => AppState) => boolean>(() => false);
   const [user, setUser] = useState<TrialUser>();
   const [conflicts, setConflicts] = useState<SyncRow[]>([]);
@@ -84,6 +87,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setState(opened);
         setUser(account);
         setStorageWarning(loaded.error);
+        unreadable.current = Boolean(loaded.error);
         outboxRef.current = loadOutbox(window.localStorage);
         setOutbox(outboxRef.current);
         setHydrated(true);
@@ -107,7 +111,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Sends the waiting record changes, 100 at a time, and takes in what changed on the server since the last sync. A
   // change someone else beat us to is held back until the person picks a copy.
   const sync = useCallback(async () => {
-    if (!IS_TRIAL || syncing.current || !navigator.onLine) return;
+    if (!IS_TRIAL || syncing.current || !navigator.onLine || unreadable.current) return;
     syncing.current = true;
     let count = 0;
     try {
@@ -197,7 +201,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSaveError(undefined);
       // QR codes read a report's status live, so a revoke or supersede has to reach the server, now or once online. On
       // the trial every changed record goes up too.
-      const changes = [...statusChanges(latestState.current, next), ...(IS_TRIAL ? changedItems(latestState.current, next).map(({ kind, id }): OutboxItem => ({ kind: "sync", item: kind, id })) : [])];
+      // The trial's QR page reads a report's status from the records, so a revoke needs nothing sent besides the sync.
+      const changes = [...(IS_TRIAL ? [] : statusChanges(latestState.current, next)), ...(IS_TRIAL ? changedItems(latestState.current, next).map(({ kind, id }): OutboxItem => ({ kind: "sync", item: kind, id })) : [])];
       latestState.current = next;
       setState(next);
       if (changes.length) { keepOutbox(changes.reduce(enqueue, outboxRef.current)); void flush(); }

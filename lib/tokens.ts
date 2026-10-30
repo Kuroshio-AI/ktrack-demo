@@ -25,9 +25,12 @@ function sign(value: string, secret: string): string {
   return base64url(createHmac("sha256", secret).update(value).digest());
 }
 
-export function createDemoToken(snapshot: Omit<DemoTokenSnapshot, "exp">, secret: string, now = Date.now()): string {
+// The trial's QR codes are printed on reports and read their status from the records, so they last as long as a report could.
+export const TRIAL_TOKEN_TTL_SECONDS = 5 * 365 * 24 * 60 * 60;
+
+export function createDemoToken(snapshot: Omit<DemoTokenSnapshot, "exp">, secret: string, now = Date.now(), ttlSeconds = TOKEN_TTL_SECONDS): string {
   if (secret.length < 32) throw new Error("DEMO_CERT_TOKEN_SECRET must be at least 32 characters");
-  const payload: DemoTokenSnapshot = { ...snapshot, exp: Math.floor(now / 1000) + TOKEN_TTL_SECONDS };
+  const payload: DemoTokenSnapshot = { ...snapshot, exp: Math.floor(now / 1000) + ttlSeconds };
   const encoded = base64url(JSON.stringify(payload));
   return `${encoded}.${sign(encoded, secret)}`;
 }

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { sessionUser } from "@/lib/auth";
+import { IS_TRIAL } from "@/lib/client";
 import { isDateString } from "@/lib/domain";
 import { uuidPattern } from "@/lib/field";
-import { createDemoToken, statusIdFor } from "@/lib/tokens";
+import { createDemoToken, statusIdFor, TRIAL_TOKEN_TTL_SECONDS } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 
@@ -15,6 +17,11 @@ function isSafeText(value: unknown, max = 160): value is string {
 export async function POST(request: Request) {
   const secret = process.env.DEMO_CERT_TOKEN_SECRET;
   if (!secret || secret.length < 32) return NextResponse.json({ error: "DEMO_CERT_TOKEN_SECRET is missing or too short" }, { status: 503 });
+  // The demos make QR codes for anyone; on the trial a QR vouches for a real report, so only AMS staff make one.
+  if (IS_TRIAL) {
+    const user = await sessionUser(request);
+    if (!user || user.role === "Customer") return NextResponse.json({ error: "Sign in as AMS staff to create a QR code." }, { status: user ? 403 : 401 });
+  }
   if (!request.headers.get("content-type")?.toLowerCase().includes("application/json")) return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
   const text = await request.text();
   if (text.length > 8_192) return NextResponse.json({ error: "Request is too large" }, { status: 413 });
@@ -30,6 +37,6 @@ export async function POST(request: Request) {
   let origin: string;
   try { const url = new URL(configuredUrl || request.url); if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("protocol"); origin = url.origin; } catch { return NextResponse.json({ error: "NEXT_PUBLIC_APP_URL is invalid" }, { status: 500 }); }
   const snapshot = { certificateNo: candidate.certificateNo as string, assetRef: candidate.assetRef as string, assetType: candidate.assetType as string, issuedDate: candidate.issuedDate as string, expiryDate: candidate.expiryDate as string, status: candidate.status as "Valid" | "Expired" | "Revoked" | "Superseded", asOf: new Date().toISOString(), ...(candidate.kind === "warranty" ? { kind: "warranty" as const } : {}), ...(typeof candidate.statusKey === "string" ? { statusId: statusIdFor(candidate.statusKey, secret) } : {}) };
-  const token = createDemoToken(snapshot, secret);
+  const token = createDemoToken(snapshot, secret, Date.now(), IS_TRIAL ? TRIAL_TOKEN_TTL_SECONDS : undefined);
   return NextResponse.json({ token, verifyUrl: `${origin}/verify?token=${encodeURIComponent(token)}` }, { headers: { "Cache-Control": "no-store" } });
 }

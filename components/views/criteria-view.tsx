@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useApp } from "@/components/app-provider";
 import { OUTCOME_TONE } from "@/components/tally-report";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { updateCriterion } from "@/lib/ams";
+import { IS_TRIAL } from "@/lib/client";
 import { CODES, DAMAGE_OUTCOMES, SAMPLE_CRITERIA } from "@/lib/tally";
 import type { DamageOutcome } from "@/lib/types";
 
@@ -19,6 +21,9 @@ export function CriteriaView() {
   const [saved, setSaved] = useState<string>();
   const [error, setError] = useState("");
   const open = state.inspections.filter((inspection) => inspection.job && (inspection.status === "Draft" || inspection.status === "Returned")).length;
+
+  // The client's procedure may already say what the sample wording says; confirming keeps every row as it reads.
+  function confirmAll() { if (update((current) => ({ ...current, criteria: (current.criteria ?? SAMPLE_CRITERIA).map(({ sample: _, ...item }) => item) }))) setSaved(undefined); }
 
   function change(code: string, patch: { criterion?: string; outcome?: DamageOutcome }) {
     setError("");
@@ -43,7 +48,8 @@ export function CriteriaView() {
         </tr>)}</tbody>
       </table></div>
       {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
-      <p className="mt-3 text-xs text-slate-500">{canEdit ? `Changing an outcome regrades the ${open} tally sheet${open === 1 ? "" : "s"} still being filled in. Submitted and issued reports keep the criteria they were graded with.` : "Switch to Admin or Manager to change a criterion."}{criteria.some((item) => item.sample) && " Rows marked Sample wording are made up for this demo; your procedure's criteria replace them."}</p>
+      <p className="mt-3 text-xs text-slate-500">{canEdit ? `Changing an outcome regrades the ${open} tally sheet${open === 1 ? "" : "s"} still being filled in. Submitted and issued reports keep the criteria they were graded with.` : IS_TRIAL ? "Only an Admin or Manager can change a criterion." : "Switch to Admin or Manager to change a criterion."}{criteria.some((item) => item.sample) && ` Rows marked Sample wording are made up; reword them to your procedure, or confirm them if they already match it.${IS_TRIAL ? " No new tally sheet opens until none are left." : ""}`}</p>
+      {canEdit && criteria.some((item) => item.sample) && <Button variant="outline" size="sm" className="press mt-3" onClick={confirmAll}>These match our procedure</Button>}
     </CardContent>
   </Card>;
 }

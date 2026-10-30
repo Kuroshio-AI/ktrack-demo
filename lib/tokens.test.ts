@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDemoToken, setLiveStatus, statusIdFor, verifyDemoToken, verifyLiveToken } from "./tokens";
+import { createDemoToken, setLiveStatus, statusIdFor, TRIAL_TOKEN_TTL_SECONDS, verifyDemoToken, verifyLiveToken } from "./tokens";
 
 const secret = "demo-only-secret-with-at-least-32-chars";
 const snapshot = { certificateNo: "CERT-1", assetRef: "HAR-001", assetType: "Harness", issuedDate: "2026-01-01", expiryDate: "2026-12-31", status: "Valid" as const, asOf: "2026-01-02T00:00:00.000Z" };
@@ -16,6 +16,12 @@ test("demo certificate tokens expire after their TTL", () => {
   const now = Date.parse("2026-01-02T00:00:00Z");
   const token = createDemoToken(snapshot, secret, now);
   assert.equal(verifyDemoToken(token, secret, now + 86_400_001).ok, false);
+});
+
+test("a trial report's QR still verifies months after printing", () => {
+  const now = Date.parse("2026-01-02T00:00:00Z");
+  const token = createDemoToken(snapshot, secret, now, TRIAL_TOKEN_TTL_SECONDS);
+  assert.equal(verifyDemoToken(token, secret, Date.parse("2027-01-02T00:00:00Z")).ok, true);
 });
 
 test("warranty tokens keep their kind and reject unknown kinds", () => {

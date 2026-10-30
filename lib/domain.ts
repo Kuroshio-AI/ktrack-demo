@@ -451,14 +451,17 @@ export function returnInspection(state: AppState, id: string, comment: string, a
   return { ...state, inspections: state.inspections.map((item) => item.id === id ? { ...item, status: "Returned", reviewerComment: comment.trim(), reviewedAt: timestamp, updatedAt: timestamp } : item), alerts: [...(returnedAlert ? [returnedAlert] : []), ...state.alerts.map((alert) => alert.occurrenceKey.startsWith(`review:${id}`) ? { ...alert, status: "resolved" as const } : alert)], activity: [activity("Inspection returned", comment.trim(), actor, timestamp), ...state.activity] };
 }
 
-export function approveInspection(state: AppState, id: string, expiryDate: string, actor = state.role, timestamp = nowIso()): AppState {
+export const certificateNumber = (date: string, sequence: number) => `CERT-${date.replaceAll("-", "")}-${String(sequence).padStart(4, "0")}`;
+
+// The trial passes the sequence the server gave out; the browser-only demos count the certificates they hold.
+export function approveInspection(state: AppState, id: string, expiryDate: string, actor = state.role, timestamp = nowIso(), sequence?: number): AppState {
   const inspection = state.inspections.find((item) => item.id === id);
   // A tally sheet issues its report with its rejects listed on it; a checklist needs every item passed or N/A.
   if (!inspection || !isComplete(inspection) || inspection.status !== "Submitted" || !isDateString(expiryDate) || expiryDate < state.demoDate || inspection.checklist.some((item) => item.result === "fail")) return state;
   if (inspection.certificateId) return state;
   const record = getRecord(state, inspection.assetId);
   if (!record) return state;
-  const number = `CERT-${state.demoDate.replaceAll("-", "")}-${String(state.records.reduce((total, item) => total + item.certificates.length, 0) + 1).padStart(4, "0")}`;
+  const number = certificateNumber(state.demoDate, sequence ?? state.records.reduce((total, item) => total + item.certificates.length, 0) + 1);
   const certificate: Certificate = { id: makeId("cert"), number, issuedDate: state.demoDate, expiryDate, result: "Pass", status: "Valid", sourceInspectionId: id };
   const issued = inspection.joints ? "Report issued" : "Certificate issued";
   const nextInspectionDate = record.inspectionIntervalMonths ? addMonthsClamped(state.demoDate, record.inspectionIntervalMonths) : undefined;

@@ -5,6 +5,9 @@ import type { AppState } from "./types";
 
 // The AMS demo link is shared, so a new browser, or a reset, opens on the sample jobs instead of an empty workspace. The
 // trial starts empty and fills from the server.
+// The trial says what to do next beside the message (components/app-shell.tsx), since it has no demo to restart.
+const RECOVER = IS_TRIAL ? "" : " Start a fresh demo or recover manually.";
+
 export const freshState = (demoDate?: string): AppState => IS_AMS && !IS_TRIAL ? amsInitialState(demoDate) : createInitialState(demoDate);
 
 export type LoadResult = { state: AppState; recovered: boolean; error?: string };
@@ -16,10 +19,10 @@ export function loadState(storage: Pick<Storage, "getItem"> | undefined, demoDat
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return { state: initial, recovered: false };
     const parsed: unknown = JSON.parse(raw);
-    if (!validateStoredState(parsed)) return { state: initial, recovered: true, error: "Stored KTrack data is unsupported or corrupted. Start a fresh demo or recover manually." };
+    if (!validateStoredState(parsed)) return { state: initial, recovered: true, error: `Stored KTrack data is unsupported or corrupted.${RECOVER}` };
     return { state: recalculateAlerts(parsed), recovered: false };
   } catch {
-    return { state: initial, recovered: true, error: "Stored KTrack data could not be read. Start a fresh demo or recover manually." };
+    return { state: initial, recovered: true, error: `Stored KTrack data could not be read.${RECOVER}` };
   }
 }
 

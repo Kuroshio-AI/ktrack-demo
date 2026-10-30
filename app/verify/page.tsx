@@ -1,7 +1,9 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ShieldAlert, ShieldCheck, ShieldMinus, ShieldX } from "lucide-react";
-import { AMS_NAME, IS_AMS } from "@/lib/client";
+import { AMS_NAME, IS_AMS, IS_TRIAL } from "@/lib/client";
+import { effectiveCertificateStatus, todayString } from "@/lib/domain";
 import { verifyLiveToken } from "@/lib/tokens";
-import type { CertificateStatus } from "@/lib/types";
+import type { Certificate, CertificateStatus } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -27,9 +29,20 @@ const WARRANTY: Partial<Record<CertificateStatus, { title: string; detail: strin
   Revoked: { title: "Warranty revoked", detail: "This warranty has been withdrawn. Do not rely on it." },
 };
 
+// The trial reads the report's status from its records, so a QR printed before a withdrawal, replacement or expiry shows it.
+async function trialStatus(number: string): Promise<CertificateStatus | undefined> {
+  const row = await getCloudflareContext().env.DB.prepare("SELECT certificate.value AS certificate FROM item, json_each(item.data, '$.certificates') AS certificate WHERE item.kind = 'record' AND item.data IS NOT NULL AND json_extract(certificate.value, '$.number') = ?")
+    .bind(number).first<{ certificate: string }>();
+  return row ? effectiveCertificateStatus(JSON.parse(row.certificate) as Certificate, todayString()) : undefined;
+}
+
 export default async function VerifyPage({ searchParams }: { searchParams: Promise<{ token?: string | string[] }> }) {
   const { token } = await searchParams;
-  const result = typeof token === "string" ? await verifyLiveToken(token, process.env.DEMO_CERT_TOKEN_SECRET ?? "") : { ok: false as const, error: "No token supplied" };
+  let result = typeof token === "string" ? await verifyLiveToken(token, process.env.DEMO_CERT_TOKEN_SECRET ?? "") : { ok: false as const, error: "No token supplied" };
+  if (IS_TRIAL && result.ok) {
+    const status = await trialStatus(result.snapshot.certificateNo);
+    result = status ? { ok: true, snapshot: { ...result.snapshot, status }, checkedAt: new Date().toISOString() } : { ok: false, error: `${AMS_NAME} has no report with this number. Do not rely on it.` };
+  }
   const checked = result.ok ? result.checkedAt ?? result.snapshot.asOf : "";
   const warranty = result.ok && result.snapshot.kind === "warranty";
   const tone = result.ok ? { ...STATUS[result.snapshot.status], ...(warranty ? WARRANTY[result.snapshot.status] : IS_AMS ? REPORT[result.snapshot.status] : {}) } : { icon: ShieldX, badge: "bg-danger", band: "bg-[#fff5f5]", title: "Cannot verify", detail: result.error };
@@ -51,7 +64,7 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
           <div><dt className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">{warranty || IS_AMS ? "Valid until" : "Expires"}</dt><dd className="mt-1 font-semibold text-[#0b3151]">{formatDate(result.snapshot.expiryDate)}</dd></div>
         </dl>
         {/* Rendered on the server, so the time is stated in UTC rather than guessing the viewer's zone. */}
-        <p className="mt-6 border-t border-[#e1e9ee] pt-4 text-xs leading-relaxed text-slate-500">Demo {warranty ? "warranty" : IS_AMS ? "report" : "certificate"} · {result.checkedAt ? "live status checked" : "status as of"} {formatDate(checked.slice(0, 10))}, {checked.slice(11, 16)} UTC.{!result.checkedAt && " This is a signed snapshot, not live certification."}</p>
+        <p className="mt-6 border-t border-[#e1e9ee] pt-4 text-xs leading-relaxed text-slate-500">{IS_TRIAL ? "Inspection report" : `Demo ${warranty ? "warranty" : IS_AMS ? "report" : "certificate"}`} · {result.checkedAt ? "live status checked" : "status as of"} {formatDate(checked.slice(0, 10))}, {checked.slice(11, 16)} UTC.{!result.checkedAt && " This is a signed snapshot, not live certification."}</p>
       </div>}
     </div>
   </main>;
