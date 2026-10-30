@@ -11,12 +11,14 @@ export const OUTBOX_KEY = "ktrack-outbox";
 export type OutboxItem =
   | { kind: "status"; statusKey: string; status: CertificateStatus; certificateNo: string }
   | { kind: "alert"; alertId: string; email: boolean; whatsapp: boolean }
-  | { kind: "sync"; item: SyncKind; id: string };
+  | { kind: "sync"; item: SyncKind; id: string }
+  | { kind: "photo"; id: string; inspectionId: string };
 
 const isItem = (value: unknown): value is OutboxItem => {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
   if (item.kind === "sync") return (SYNC_KINDS as readonly unknown[]).includes(item.item) && typeof item.id === "string";
+  if (item.kind === "photo") return typeof item.id === "string" && typeof item.inspectionId === "string";
   return item.kind === "status" ? typeof item.statusKey === "string" && (item.status === "Revoked" || item.status === "Superseded") && typeof item.certificateNo === "string"
     : item.kind === "alert" && typeof item.alertId === "string" && typeof item.email === "boolean" && typeof item.whatsapp === "boolean";
 };
@@ -36,6 +38,7 @@ export function saveOutbox(storage: Pick<Storage, "setItem">, items: OutboxItem[
 // record changed again still waits once, and goes up as its latest copy.
 export function enqueue(items: OutboxItem[], item: OutboxItem): OutboxItem[] {
   if (item.kind === "sync") return items.some((other) => other.kind === "sync" && other.item === item.item && other.id === item.id) ? items : [...items, item];
+  if (item.kind === "photo") return items.some((other) => other.kind === "photo" && other.id === item.id) ? items : [...items, item];
   if (item.kind === "status") return [...items.filter((other) => other.kind !== "status" || other.statusKey !== item.statusKey), item];
   const waiting = items.find((other): other is Extract<OutboxItem, { kind: "alert" }> => other.kind === "alert" && other.alertId === item.alertId);
   if (!waiting) return [...items, item];
@@ -76,13 +79,22 @@ export type Delivery = {
   error?: string;
 };
 
-type DeliverOptions = { fetch?: typeof fetch; online?: () => boolean; emailConfig?: EmailJsConfig; now?: () => string };
+// loadPhoto reads a photo's image from the browser (lib/photo-store.ts); it's passed in so this file runs in tests.
+type DeliverOptions = { fetch?: typeof fetch; online?: () => boolean; emailConfig?: EmailJsConfig; now?: () => string; loadPhoto?: (id: string) => Promise<Blob | undefined> };
 
 // Statuses and alerts, one at a time. Sync items go up together through the provider's sync().
 export async function deliver(item: Exclude<OutboxItem, { kind: "sync" }>, state: AppState, options: DeliverOptions = {}): Promise<Delivery> {
   const fetchImpl = options.fetch ?? fetch;
   const online = options.online ?? (() => navigator.onLine);
   const now = options.now ?? (() => new Date().toISOString());
+  if (item.kind === "photo") {
+    // A photo removed before it went up has nothing left to send.
+    const image = await options.loadPhoto?.(item.id).catch(() => undefined);
+    if (!image) return {};
+    const response = await fetchImpl(`/api/photos/${encodeURIComponent(item.id)}?inspection=${encodeURIComponent(item.inspectionId)}`, { method: "PUT", headers: { "content-type": image.type || "image/jpeg" }, body: image }).catch(() => undefined);
+    if (!response || response.status === 401 || response.status >= 500) return { left: item };
+    return response.ok ? {} : { error: "A photo couldn't be uploaded. It stays on this laptop; remove it and add it again." };
+  }
   if (item.kind === "status") {
     const response = await fetchImpl("/api/certificates/status", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ statusKey: item.statusKey, status: item.status }) }).catch(() => undefined);
     if (!response) return { left: item };

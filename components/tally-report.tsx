@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Printer } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
+import { PhotoImage, photoTitle } from "@/components/tally-photos";
 import { Signature } from "@/components/warranty-document";
 import { ADDITIONAL_SERVICES, INSPECTION_PROGRAM } from "@/lib/ams";
 import { AMS_NAME } from "@/lib/client";
@@ -34,6 +35,8 @@ export function TallyReport({ inspection, record, certificate, equipment, qr, qr
   if (!spec || !job) return null;
   const summary = summarizeTally(spec, job, joints);
   const date = certificate?.issuedDate ?? inspection.submittedAt?.slice(0, 10);
+  const photos = [...(job.photos ?? [])].sort((a, b) => (a.pipe ?? 0) - (b.pipe ?? 0));
+  const pages = photos.length ? 3 : 2;
   const header: [string, string][][] = [
     [["Customer", record.owner], ["Report no.", certificate?.number ?? "Draft, not issued"], ["Date", date ? formatDate(date) : "–"]],
     [["Location", job.location || "–"], ["Work order no.", record.assetRef], ["Rig · Well #", `${record.site} · ${job.well || "–"}`]],
@@ -77,7 +80,7 @@ export function TallyReport({ inspection, record, certificate, equipment, qr, qr
           : qrPending && <div className="grid size-24 shrink-0 place-items-center border border-dashed border-slate-400 p-2 text-center text-[9px] font-semibold leading-snug text-slate-500">QR code added when back online</div>}
         <div className="grid flex-1 grid-cols-3 gap-6"><Signature label="Customer signature" name="" /><Signature label="Inspector name & signature" name={inspection.inspector} date={inspection.submittedAt} image={inspection.signature} /><Signature label="Approved by" name={certificate ? "Authorised reviewer" : "Awaiting approval"} date={certificate ? inspection.reviewedAt : undefined} /></div>
       </div>
-      <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1.5 text-[9px] text-slate-500"><span>Laid out as F.581 · filled in by KTrack from tally sheet F.582 · demo report, fictional job{spec.sample ? ", sample limits" : ""}</span><span>Page 1 of 2</span></footer>
+      <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1.5 text-[9px] text-slate-500"><span>Laid out as F.581 · filled in by KTrack from tally sheet F.582 · demo report, fictional job{spec.sample ? ", sample limits" : ""}</span><span>Page 1 of {pages}</span></footer>
     </div>
 
     <div className="tally-page mt-8 border-[3px] border-[#0b3151] p-4">
@@ -99,8 +102,17 @@ export function TallyReport({ inspection, record, certificate, equipment, qr, qr
         </tbody>
       </table>
       <p className="mt-1.5 text-[7.5px] text-slate-600"><b>ID coating:</b> 1 intact; 2 over 80% overall, over 75% localised; 3 65 to 80% overall, 50 to 75% localised; 4 under 65% overall, under 50% localised. <b>Codes:</b> {Object.entries(CODES).filter(([code]) => code !== "OK").map(([code, meaning]) => `${code} ${meaning.toLowerCase()}`).join(", ")}.</p>
-      <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1 text-[8px] text-slate-500"><span>Laid out as F.582 · {joints.length} pipes</span><span>Page 2 of 2</span></footer>
+      <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1 text-[8px] text-slate-500"><span>Laid out as F.582 · {joints.length} pipes</span><span>Page 2 of {pages}</span></footer>
     </div>
+
+    {photos.length > 0 && <div className="photo-page mt-8 border-[3px] border-[#0b3151] p-4">
+      <header className="flex items-end justify-between"><div><div className="text-sm font-black uppercase tracking-[.08em] text-navy">{AMS_NAME}</div><div className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-600">Photographs</div></div><div className="tally-mono text-right text-[10px] text-slate-600">{record.assetRef} · {record.owner}{certificate ? ` · ${certificate.number}` : ""}</div></header>
+      <div className="mt-3 grid grid-cols-2 gap-3">{photos.map((photo) => <figure key={photo.id} className="break-inside-avoid border border-[#b9c6d0]">
+        <PhotoImage id={photo.id} alt={photoTitle(photo)} className="aspect-[4/3] w-full object-cover" />
+        <figcaption className="border-t border-[#b9c6d0] px-2 py-1 text-[10px]"><b className="tally-mono">{photo.pipe ? `Pipe ${photo.pipe}` : "Whole sheet"}</b>{photo.caption ? ` · ${photo.caption}` : ""}</figcaption>
+      </figure>)}</div>
+      <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1 text-[8px] text-slate-500"><span>Taken during inspection · {photos.length} photo{photos.length === 1 ? "" : "s"}</span><span>Page 3 of {pages}</span></footer>
+    </div>}
   </div>;
 }
 

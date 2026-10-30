@@ -166,6 +166,10 @@ export type Joint = {
 // calibratedOn is the last recorded calibration; instruments added without one have only a due date.
 export type Equipment = { id: string; kind: string; model: string; serial: string; calibrationDue: string; calibratedOn?: string };
 
+// AMS only: a photo taken while inspecting, of one pipe or the whole sheet. The image is kept apart from the record, in
+// the browser (lib/photo-store.ts) and, on the trial, in R2 under the same id; it prints on the F.581's photo page.
+export type TallyPhoto = { id: string; pipe?: number; caption?: string; bytes: number; takenAt: string };
+
 // AMS only: the F.581 and F.582 header fields that aren't on the job record (customer, rig and work order are).
 export type TallyJob = {
   well: string;
@@ -184,6 +188,7 @@ export type TallyJob = {
   equipment?: Equipment[];
   // The damage criteria the sheet is graded with: live while it is a draft, fixed once submitted.
   criteria?: DamageCriterion[];
+  photos?: TallyPhoto[];
 };
 
 export type Inspection = {

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { IS_TRIAL } from "@/lib/client";
 import { createInitialState, recalculateAlerts, setDemoDate as setDate, setRole as setCurrentRole, STORAGE_KEY, todayString } from "@/lib/domain";
 import { deliver, enqueue, loadOutbox, OUTBOX_KEY, saveOutbox, statusChanges, type OutboxItem } from "@/lib/outbox";
+import { clearPhotos, loadPhoto } from "@/lib/photo-store";
 import { commitState, freshState, loadState } from "@/lib/storage";
 import { changedItems, itemData, loadSyncMeta, mergeRows, saveSyncMeta, SYNC_KEY, syncKey, type SyncKind, type SyncRow, type TrialUser } from "@/lib/sync";
 import { WHATSAPP_COOLDOWN_MS } from "@/lib/whatsapp";
@@ -49,6 +50,7 @@ async function trialUser(): Promise<TrialUser | "signed-out"> {
   const waiting = loadOutbox(window.localStorage).some(isSyncItem);
   if (meta.user?.id !== user.id && (!waiting || user.role === "Customer" || meta.user?.role === "Customer")) {
     for (const key of [STORAGE_KEY, OUTBOX_KEY]) window.localStorage.removeItem(key);
+    await clearPhotos();
     saveSyncMeta(window.localStorage, { cursor: 0, versions: {}, user });
   } else saveSyncMeta(window.localStorage, { ...meta, user });
   return user;
@@ -158,7 +160,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       while ((item = next()) && navigator.onLine) {
         const current = item;
         if (current.kind === "alert" && current.whatsapp) await new Promise((resolve) => setTimeout(resolve, Math.max(0, lastWhatsApp + WHATSAPP_COOLDOWN_MS - Date.now())));
-        const result = await deliver(current, latestState.current);
+        const result = await deliver(current, latestState.current, { loadPhoto });
         const sent = result.sent;
         if (sent?.whatsapp) lastWhatsApp = Date.now();
         if (sent && (sent.email || sent.whatsapp)) updateRef.current((state) => ({ ...state, alerts: state.alerts.map((alert) => alert.id === sent.alertId ? { ...alert, emailSentAt: alert.emailSentAt ?? sent.email, whatsappSentAt: alert.whatsappSentAt ?? sent.whatsapp } : alert) }));
@@ -228,13 +230,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void sync();
   }, [commit, keepOutbox, keepConflicts, sync]);
 
-  // Signing out clears this laptop's copy, so it waits until every change has reached the server.
+  // Signing out clears this laptop's copy, so it waits until every change and photo has reached the server.
   const signOut = useCallback(async () => {
-    const waiting = outboxRef.current.filter(isSyncItem).length;
+    const waiting = outboxRef.current.filter((item) => item.kind === "sync" || item.kind === "photo").length;
     if (waiting) { setSaveError(`${waiting} change${waiting === 1 ? " hasn't" : "s haven't"} reached the server yet. Connect to the internet and wait for ${waiting === 1 ? "it" : "them"} to send before signing out.`); return; }
     const response = await fetch("/api/auth/sign-out", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
     if (!response?.ok) { setSaveError("Signing out needs the internet. Try again once you're online."); return; }
     for (const key of [STORAGE_KEY, OUTBOX_KEY, SYNC_KEY]) window.localStorage.removeItem(key);
+    await clearPhotos();
     window.location.replace("/sign-in");
   }, []);
 

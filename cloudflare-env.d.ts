@@ -11,4 +11,9 @@ interface D1Database {
   batch<T = unknown>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
   exec(query: string): Promise<unknown>;
 }
-interface CloudflareEnv { DB: D1Database }
+interface R2ObjectBody { body: ReadableStream; httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }
+interface R2Bucket {
+  get(key: string): Promise<R2ObjectBody | null>;
+  put(key: string, value: ArrayBuffer, options?: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> }): Promise<unknown>;
+}
+interface CloudflareEnv { DB: D1Database; PHOTOS: R2Bucket }

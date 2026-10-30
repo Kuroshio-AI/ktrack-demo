@@ -9,6 +9,8 @@
   "observability": { "enabled": true },
   // Sign-in and shared records (lib/auth.ts, app/api/sync). Migrations in migrations/.
   "d1_databases": [{ "binding": "DB", "database_name": "ktrack-ams-trial", "database_id": "a6bac757-fd8a-421b-8583-13e06930c7ed" }],
+  // Tally sheet photos (app/api/photos). Create once: npx wrangler r2 bucket create ktrack-ams-trial-photos
+  "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "ktrack-ams-trial-photos" }],
   // BETTER_AUTH_SECRET is a secret (wrangler secret put); local preview reads both from .dev.vars.
   "vars": { "BETTER_AUTH_URL": "https://ktrack-ams-trial.devops-731.workers.dev" }
 }

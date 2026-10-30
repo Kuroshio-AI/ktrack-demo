@@ -57,3 +57,17 @@ test("an alert sends its email, and its WhatsApp waits when the connection drops
   assert.deepEqual(whatsapp, { sent: { alertId, whatsapp: "2026-10-30T09:05:00.000Z" }, error: undefined });
   assert.deepEqual(await deliver({ ...item, alertId: "gone" }, state, { fetch: offlineFetch }), {}, "a deleted alert drops out");
 });
+
+test("a photo goes up from this laptop's copy, waits while offline, and is dropped once removed", async () => {
+  const item: OutboxItem = { kind: "photo", id: "photo-1", inspectionId: "sheet-1" };
+  const image = new Blob(["jpeg"], { type: "image/jpeg" });
+  const sent: string[] = [];
+  const accepted = ((url: string, init: RequestInit) => { sent.push(`${init.method} ${url} ${(init.headers as Record<string, string>)["content-type"]}`); return Promise.resolve(new Response(null, { status: 204 })); }) as typeof fetch;
+  assert.deepEqual(await deliver(item, workspace, { fetch: accepted, loadPhoto: async () => image }), {});
+  assert.deepEqual(sent, ["PUT /api/photos/photo-1?inspection=sheet-1 image/jpeg"]);
+  assert.deepEqual(await deliver(item, workspace, { fetch: offlineFetch, loadPhoto: async () => image }), { left: item });
+  assert.deepEqual(await deliver(item, workspace, { fetch: (() => reply(503)) as typeof fetch, loadPhoto: async () => image }), { left: item }, "a server hiccup is retried");
+  assert.deepEqual(await deliver(item, workspace, { fetch: offlineFetch, loadPhoto: async () => undefined }), {}, "removed before it went up");
+  assert.match((await deliver(item, workspace, { fetch: (() => reply(413)) as typeof fetch, loadPhoto: async () => image })).error ?? "", /couldn't be uploaded/);
+  assert.deepEqual(enqueue(enqueue([], item), { ...item }), [item]);
+});
