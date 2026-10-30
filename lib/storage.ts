@@ -1,10 +1,11 @@
 import { amsInitialState } from "./ams";
-import { IS_AMS } from "./client";
+import { IS_AMS, IS_TRIAL } from "./client";
 import { STORAGE_KEY, createInitialState, recalculateAlerts, validateStoredState } from "./domain";
 import type { AppState } from "./types";
 
-// The AMS demo link is shared, so a new browser, or a reset, opens on the sample jobs instead of an empty workspace.
-export const freshState = (demoDate?: string): AppState => IS_AMS ? amsInitialState(demoDate) : createInitialState(demoDate);
+// The AMS demo link is shared, so a new browser, or a reset, opens on the sample jobs instead of an empty workspace. The
+// trial starts empty and fills from the server.
+export const freshState = (demoDate?: string): AppState => IS_AMS && !IS_TRIAL ? amsInitialState(demoDate) : createInitialState(demoDate);
 
 export type LoadResult = { state: AppState; recovered: boolean; error?: string };
 

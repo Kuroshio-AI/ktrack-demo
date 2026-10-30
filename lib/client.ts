@@ -10,3 +10,7 @@ export const FLS_DUE_LEAD_DAYS = 15;
 
 // The FLS service provider's forms answer each item Ok, Not Ok or N/A; Kee's inspections say Pass and Fail.
 export const RESULT_LABELS = IS_FLS ? { pass: "Ok", fail: "Not Ok", na: "N/A" } : { pass: "Pass", fail: "Fail", na: "N/A" };
+
+// The Al Mansoori trial on Cloudflare (npm run cf:deploy): sign-in, and records shared through the server's D1 database.
+// The Vercel demos leave it unset and keep everything in the browser.
+export const IS_TRIAL = process.env.NEXT_PUBLIC_TRIAL === "1";

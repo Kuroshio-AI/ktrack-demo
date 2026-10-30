@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { CloudUpload, Download, WifiOff } from "lucide-react";
+import { AlertTriangle, CloudUpload, Download, WifiOff } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { Button } from "@/components/ui/button";
+import { itemLabel, syncKey } from "@/lib/sync";
 
 // KTrack as an installed app: the Install button, the service worker (public/sw.js) that lets it open with no internet,
 // and the banner that says what waits for the connection. Readings never wait: they are saved on the laptop as typed.
@@ -60,7 +61,9 @@ const updates = (count: number) => `${count} update${count === 1 ? "" : "s"}`;
 
 export function OfflineBanner() {
   const online = useOnline();
-  const { outbox, lastSync } = useApp();
+  const { outbox: queued, lastSync, conflicts } = useApp();
+  // A change held back by a conflict isn't on its way; the conflict notice below covers it.
+  const outbox = queued.filter((item) => item.kind !== "sync" || !conflicts.some((row) => row.kind === item.item && row.id === item.id));
   // "Sent" shows for 6 seconds after a reconnect empties the outbox, and only after the laptop really was offline.
   const [seen, setSeen] = useState<number>();
   const [wasOffline, setWasOffline] = useState(false);
@@ -82,4 +85,25 @@ export function OfflineBanner() {
     <p><b>Back online.</b> {outbox.length ? `Sending ${updates(outbox.length)}…` : `${updates(sent)} sent.`}</p>
   </div>;
   return null;
+}
+
+const changedAt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+// Trial only: a record changed on this laptop and on another before either synced. Nothing is overwritten until the
+// person picks a copy; until then this laptop's change stays here, unsent.
+export function SyncConflicts() {
+  const { conflicts, resolveConflict, state } = useApp();
+  if (!conflicts.length) return null;
+  return <div role="alert" className="animate-rise mb-5 rounded-lg border border-warning/30 bg-warning/[.07] px-4 py-3 text-sm text-navy">
+    <p className="flex items-center gap-2 font-bold"><AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden="true" />Changed on another laptop too</p>
+    <ul className="mt-2 flex flex-col gap-3">
+      {conflicts.map((row) => <li key={syncKey(row.kind, row.id)} className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <p className="min-w-[240px] flex-1">{itemLabel(state, row.kind, row.id, row.data)} was {row.data === null ? "removed" : "changed"} by <b>{row.updatedBy}</b> on {changedAt.format(new Date(row.updatedAt))}. Your changes to it haven&apos;t been sent.</p>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" className="press" onClick={() => resolveConflict(row, "theirs")}>Use theirs</Button>
+          <Button size="sm" className="press" onClick={() => resolveConflict(row, "mine")}>Keep mine</Button>
+        </div>
+      </li>)}
+    </ul>
+  </div>;
 }

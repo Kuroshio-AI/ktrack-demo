@@ -13,12 +13,13 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test lib/*.test.ts",
-    "cf:preview": "NEXT_PUBLIC_CLIENT=ams opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "cf:deploy": "ls .env .env.local .env.production .env.production.local 2>/dev/null | grep . && echo \"The Cloudflare build copies these .env files into the worker. Deploy from a checkout without them.\" && exit 1; NEXT_PUBLIC_CLIENT=ams opennextjs-cloudflare build && opennextjs-cloudflare deploy"
+    "cf:preview": "NEXT_PUBLIC_CLIENT=ams NEXT_PUBLIC_TRIAL=1 opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "cf:deploy": "ls .env .env.local .env.production .env.production.local 2>/dev/null | grep . && echo \"The Cloudflare build copies these .env files into the worker. Deploy from a checkout without them.\" && exit 1; NEXT_PUBLIC_CLIENT=ams NEXT_PUBLIC_TRIAL=1 opennextjs-cloudflare build && opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "1.20.14",
     "@radix-ui/react-slot": "1.2.3",
+    "better-auth": "1.7.14",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "0.468.0",

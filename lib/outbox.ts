@@ -1,18 +1,22 @@
 import { sendAlertEmail, type EmailJsConfig } from "./email";
+import { SYNC_KINDS, type SyncKind } from "./sync";
 import type { Alert, AppState, CertificateStatus } from "./types";
 
 // Work that needs our server: a report's new status for the QR codes already printed, and an alert's email or WhatsApp
-// message. Offline it waits here, in its own localStorage key so a closed laptop keeps it, and goes out when the
-// connection returns. Tally sheets themselves never wait: they live on the laptop.
+// message, and on the trial every change to a shared record (lib/sync.ts). Offline it waits here, in its own localStorage
+// key so a closed laptop keeps it, and goes out when the connection returns. Readings never wait to be saved: the laptop
+// keeps them as typed.
 export const OUTBOX_KEY = "ktrack-outbox";
 
 export type OutboxItem =
   | { kind: "status"; statusKey: string; status: CertificateStatus; certificateNo: string }
-  | { kind: "alert"; alertId: string; email: boolean; whatsapp: boolean };
+  | { kind: "alert"; alertId: string; email: boolean; whatsapp: boolean }
+  | { kind: "sync"; item: SyncKind; id: string };
 
 const isItem = (value: unknown): value is OutboxItem => {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
+  if (item.kind === "sync") return (SYNC_KINDS as readonly unknown[]).includes(item.item) && typeof item.id === "string";
   return item.kind === "status" ? typeof item.statusKey === "string" && (item.status === "Revoked" || item.status === "Superseded") && typeof item.certificateNo === "string"
     : item.kind === "alert" && typeof item.alertId === "string" && typeof item.email === "boolean" && typeof item.whatsapp === "boolean";
 };
@@ -28,8 +32,10 @@ export function saveOutbox(storage: Pick<Storage, "setItem">, items: OutboxItem[
   storage.setItem(OUTBOX_KEY, JSON.stringify(items));
 }
 
-// A report's latest status replaces an older one still waiting; a second send of the same alert adds its channels.
+// A report's latest status replaces an older one still waiting; a second send of the same alert adds its channels; a
+// record changed again still waits once, and goes up as its latest copy.
 export function enqueue(items: OutboxItem[], item: OutboxItem): OutboxItem[] {
+  if (item.kind === "sync") return items.some((other) => other.kind === "sync" && other.item === item.item && other.id === item.id) ? items : [...items, item];
   if (item.kind === "status") return [...items.filter((other) => other.kind !== "status" || other.statusKey !== item.statusKey), item];
   const waiting = items.find((other): other is Extract<OutboxItem, { kind: "alert" }> => other.kind === "alert" && other.alertId === item.alertId);
   if (!waiting) return [...items, item];
@@ -72,7 +78,8 @@ export type Delivery = {
 
 type DeliverOptions = { fetch?: typeof fetch; online?: () => boolean; emailConfig?: EmailJsConfig; now?: () => string };
 
-export async function deliver(item: OutboxItem, state: AppState, options: DeliverOptions = {}): Promise<Delivery> {
+// Statuses and alerts, one at a time. Sync items go up together through the provider's sync().
+export async function deliver(item: Exclude<OutboxItem, { kind: "sync" }>, state: AppState, options: DeliverOptions = {}): Promise<Delivery> {
   const fetchImpl = options.fetch ?? fetch;
   const online = options.online ?? (() => navigator.onLine);
   const now = options.now ?? (() => new Date().toISOString());
