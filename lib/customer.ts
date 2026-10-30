@@ -1,6 +1,18 @@
 import { effectiveCertificateStatus } from "./domain";
+import { customerKey } from "./sync";
 import { FINAL_CLASSES, summarizeTally } from "./tally";
 import type { AppState, AssetRecord, Certificate, CertificateStatus, FinalClass, Inspection } from "./types";
+
+// A new tally sheet's Customer choices: every customer with a login, then other names earlier jobs used. Each appears
+// once, matched the way the server matches a job to an account, and spelled as on the login.
+export function customerChoices(accounts: string[], owners: string[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const name of [...accounts, ...owners]) {
+    const key = customerKey(name);
+    if (key && !byKey.has(key)) byKey.set(key, name.trim().replace(/\s+/g, " "));
+  }
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b));
+}
 
 // The customer portal's numbers: one shipment per tally sheet, from the same grading as the F.581. Classes count only once
 // the report is issued, since a sheet still being measured or reviewed can change.

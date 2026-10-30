@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { amsInitialState } from "./ams";
-import { customerShipments, shipmentTotals } from "./customer";
+import { customerChoices, customerShipments, shipmentTotals } from "./customer";
 import { FINAL_CLASSES } from "./tally";
 
 // The AMS sample: WO-2026-0391 issued with 24 pipes, WO-2026-0422 still being measured.
@@ -23,4 +23,8 @@ test("totals leave out revoked and superseded reports", () => {
   assert.equal(shipmentTotals(shipments).pipes, 24);
   const revoked = shipments.map((item) => item.certificate ? { ...item, status: "Revoked" as const } : item);
   assert.deepEqual(shipmentTotals(revoked), { ...shipmentTotals([]), shipments: 0 });
+});
+
+test("the Customer list names each customer once, spelled as on their login", () => {
+  assert.deepEqual(customerChoices(["Sample Drilling Co.", "Gulf  Rigs LLC"], ["sample drilling co. ", "Desert Well Services", ""]), ["Desert Well Services", "Gulf Rigs LLC", "Sample Drilling Co."]);
 });

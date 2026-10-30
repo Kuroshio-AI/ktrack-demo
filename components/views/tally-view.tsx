@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useEffect, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { flushSync } from "react-dom";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -17,6 +17,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ADDITIONAL_SERVICES, addPipe, createTally, deleteTally, INSPECTION_PROGRAM, isEmptyPipe, removeLastPipe, TALLY_TITLE } from "@/lib/ams";
 import { IS_TRIAL } from "@/lib/client";
+import { customerChoices } from "@/lib/customer";
 import { submitInspection, updateInspection } from "@/lib/domain";
 import { calibrationStatus, class2Text, CODES, connectionLabel, CONNECTION_STEPS, expiredEquipment, FINAL_CLASSES, gradePipe, inches, limitFailure, limitFor, limitText, pickConnection, readingText, reasons, SAMPLE_CRITERIA, summarizeTally, TALLY_COLUMNS, type Group, type TallyColumn } from "@/lib/tally";
 import type { AppState, FinalClass, Inspection, InspectionStatus, Joint, TallyJob } from "@/lib/types";
@@ -65,6 +66,13 @@ function applyCell(joint: Joint, cell: TallyColumn | "serial", text: string): Jo
 // quarter of the row at 1280px and drops its select below the others.
 const STEP_LABEL: Record<(typeof CONNECTION_STEPS)[number], string> = { size: "Pipe OD", weight: "Weight lb/ft", connection: "Connection", grade: "Grade" };
 
+// The customers with a login, kept from the last time this laptop was online so the list still opens offline.
+const CUSTOMERS_KEY = "ktrack-customers";
+const OTHER_CUSTOMER = "__other";
+function savedCustomers(): string[] {
+  try { const saved: unknown = JSON.parse(localStorage.getItem(CUSTOMERS_KEY) ?? "[]"); return Array.isArray(saved) ? saved.filter((name) => typeof name === "string") : []; } catch { return []; }
+}
+
 function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; onCancel: () => void }) {
   const { state, update, user } = useApp();
   const connections = state.connections ?? [];
@@ -75,7 +83,18 @@ function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; on
   const chosen = connections.find((spec) => spec.id === form.connectionId);
   const picked = pickConnection(connections, chosen ?? {});
   const choose = (field: (typeof CONNECTION_STEPS)[number], value: string) => { const spec = pickConnection(connections, { ...chosen, [field]: value }).spec; if (spec) setForm((current) => ({ ...current, connectionId: spec.id, nominalWall: spec.size === chosen?.size && spec.weight === chosen.weight ? current.nominalWall : lastWall(state, spec) })); };
-  const customers = [...new Set(state.records.map((record) => record.owner.trim()).filter(Boolean))].sort();
+  const [accounts, setAccounts] = useState(savedCustomers);
+  const [otherCustomer, setOtherCustomer] = useState(false);
+  useEffect(() => {
+    if (!IS_TRIAL) return;
+    fetch("/api/customers").then((response) => response.ok ? response.json() as Promise<{ customers: string[] }> : undefined).then((body) => {
+      if (!body) return;
+      setAccounts(body.customers);
+      try { localStorage.setItem(CUSTOMERS_KEY, JSON.stringify(body.customers)); } catch { /* the list still shows this time */ }
+    }).catch(() => { /* offline: the saved list stands */ });
+  }, []);
+  const customers = customerChoices(accounts, state.records.map((record) => record.owner));
+  const chooseCustomer = (value: string) => { setOtherCustomer(value === OTHER_CUSTOMER); setForm((current) => ({ ...current, customer: value === OTHER_CUSTOMER ? "" : value })); };
   // A real sheet is graded with the client's own damage criteria, so none opens while any are still the sample wording.
   const sampleCriteria = IS_TRIAL && (state.criteria ?? SAMPLE_CRITERIA).some((item) => item.sample);
   function create() {
@@ -97,8 +116,14 @@ function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; on
         <p className="col-span-full -mt-2 text-xs text-slate-500">{picked.spec.sample ? "Sample limits, not DS-1 or API values." : `Limits from ${picked.spec.standard ?? "DS-1"}.`} Grade can&apos;t be measured, so match it to the stamp on the pin.</p>
       </fieldset> : <div className="sm:col-span-2 xl:col-span-8"><label className="eyebrow" htmlFor="tally-connection">Pipe and thread connection</label><Select id="tally-connection" className="mt-1.5" disabled><option>Import a dimension table first</option></Select></div>}
       {field("jobNo", "Work order", "xl:col-span-3")}
-      {field("customer", "Customer", "xl:col-span-3", { list: "tally-customers", autoComplete: "off", placeholder: "As on their KTrack account…" })}
-      <datalist id="tally-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
+      <div className="xl:col-span-3"><label className="eyebrow" htmlFor="tally-customer">Customer</label>
+        <Select id="tally-customer" className="mt-1.5" value={otherCustomer ? OTHER_CUSTOMER : form.customer} onChange={(event) => chooseCustomer(event.target.value)}>
+          <option value="" disabled>Choose a customer…</option>
+          {customers.map((name) => <option key={name}>{name}</option>)}
+          <option value={OTHER_CUSTOMER}>Other customer…</option>
+        </Select>
+        {otherCustomer && <Input className="mt-2" aria-label="Customer name" value={form.customer} onChange={set("customer")} placeholder="Customer name…" autoComplete="off" autoFocus />}
+      </div>
       {field("rig", "Rig", "xl:col-span-3", { placeholder: "Rig SD-09" })}
       {field("well", "Well no.", "xl:col-span-3", { placeholder: "SD-09-01" })}
       {field("location", "Location", "xl:col-span-2", { placeholder: "Musaffah yard…" })}
