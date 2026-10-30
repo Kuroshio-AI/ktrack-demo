@@ -17,3 +17,7 @@ playwright-report/
 .vercel
 # Client brief, tracker sheet and voice notes: this repo is public, so they never get committed.
 /contextforclient/
+# Cloudflare build output and wrangler state
+.open-next/
+.wrangler/
+.dev.vars*

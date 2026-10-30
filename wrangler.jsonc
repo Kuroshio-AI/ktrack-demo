@@ -1,0 +1,10 @@
+// The Al Mansoori trial on Cloudflare Workers, built by OpenNext (open-next.config.ts). The Vercel demo ignores this file.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ktrack-ams-trial",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-23",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true }
+}

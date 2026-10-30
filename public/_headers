@@ -1,0 +1,5 @@
+# Cloudflare serves public/ files before the app runs, so next.config.ts headers never reach them. Same rules for the
+# service worker as next.config.ts.
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Content-Security-Policy: default-src 'self'; script-src 'self'

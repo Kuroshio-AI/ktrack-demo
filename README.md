@@ -67,6 +67,14 @@ Chrome and Edge offer to install KTrack (the Install KTrack button at the foot o
 - **Banner.** Offline, a banner says everything is saved on the laptop and how many updates wait; on reconnect it says how many went out.
 - **Limits.** Each browser keeps its own workspace, so nothing syncs between two laptops; that needs a backend. The verify page that a scanned QR opens always needs the internet.
 
+## Cloudflare trial (AMS)
+
+The Al Mansoori trial runs on Cloudflare Workers (Workers Paid), built by OpenNext (`open-next.config.ts`, `wrangler.jsonc`). Vercel ignores both files.
+
+- `npm run cf:preview` builds the AMS profile for Workers and runs it in Cloudflare's local runtime at http://localhost:8787.
+- `npm run cf:deploy` builds and deploys the worker `ktrack-ams-trial`. It refuses to run while `.env`, `.env.local`, `.env.production` or `.env.production.local` exists, because the OpenNext build copies every value in those files into the worker, secrets included. Deploy from a checkout without them and set server secrets with `npx wrangler secret put <NAME>`.
+- Files in `public/` are served before the app runs, so `next.config.ts` headers don't reach them; `public/_headers` repeats the service worker's.
+
 ## Register format and limits
 
 `.xlsx` files contain a worksheet named `Register`, a worksheet named `Savings`, or both. CSV files use the same fixed UTF-8 headers in the template: `asset_ref`, `record_type`, `asset_type`, `site`, `owner`, `serial_no`, `assigned_engineer`, `inspection_due_date`, `inspection_interval_months`, `licence_expiry_date`, `certificate_no`, `certificate_issued_date`, `certificate_expiry_date`, `retirement_due_date`, `status`. `asset_ref`, `record_type`, `asset_type`, `site` and `owner` are required. Date values are stored as calendar strings (`YYYY-MM-DD`), certificate fields are all-or-nothing, and certificate expiry cannot precede issue. Formula cells, malformed layouts, duplicate trimmed case-insensitive asset refs, files over 2MB and imports exceeding 500 total register records are rejected or reported per row. Duplicate rows never overwrite existing records.
