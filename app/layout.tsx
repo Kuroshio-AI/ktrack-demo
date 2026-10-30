@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   title: IS_FLS ? "KTrack · FLS Certificate Tracker" : IS_AMS ? "KTrack · Drill Pipe Inspection" : "KTrack · Operations Console",
   description: IS_FLS ? "KTrack (Kuroshio Track): a local-first FLS DCD certificate tracker demo." : IS_AMS ? "KTrack (Kuroshio Track): drill pipe tally sheets checked against the dimension table, issued as inspection reports." : "KTrack (Kuroshio Track): a local-first Kee Safety operations demo.",
   robots: { index: false, follow: false },
-  icons: { icon: "/icon.svg" },
+  icons: { icon: "/icon.svg", apple: "/icons/apple-icon.png" },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

@@ -27,7 +27,7 @@ const Tick = ({ on, label }: { on: boolean; label: string }) => <li className="f
 
 // The F.581 summary report, filled from the tally: the same sections in the same order as the client's paper form, then the
 // F.582 tally itself as a landscape page. KTrack adds the report number, the QR code and the inspector's signature.
-export function TallyReport({ inspection, record, certificate, equipment, qr }: { inspection: Inspection; record: AssetRecord; certificate?: Certificate; equipment: Equipment[]; qr?: string }) {
+export function TallyReport({ inspection, record, certificate, equipment, qr, qrPending }: { inspection: Inspection; record: AssetRecord; certificate?: Certificate; equipment: Equipment[]; qr?: string; qrPending?: boolean }) {
   const spec = inspection.connection;
   const job = inspection.job;
   const joints = inspection.joints ?? [];
@@ -73,7 +73,8 @@ export function TallyReport({ inspection, record, certificate, equipment, qr }: 
       <Box className="mt-2" title="Equipment details"><div className="grid grid-cols-3">{equipment.map((item, index) => <dl key={item.id} className={`border-b border-[#d6dee5] px-2 py-1 ${index % 3 !== 2 ? "border-r border-r-[#d6dee5]" : ""}`}><dt className="text-[9.5px] font-bold uppercase text-navy">{item.kind}</dt><dd className="tally-mono text-[10px] text-slate-600">Model {item.model} · S/N {item.serial}</dd><dd className="tally-mono text-[10px] text-slate-600">Cal. due {formatDate(item.calibrationDue)}</dd></dl>)}{!equipment.length && <p className="col-span-3 px-3 py-2 text-slate-500">No instruments listed.</p>}</div></Box>
 
       <div className="mt-3 flex break-inside-avoid items-end gap-6">
-        {qr && <div className="shrink-0 text-center"><img src={qr} alt="Report verification QR" className="mx-auto size-24" /><div className="text-[9px] font-bold uppercase tracking-[.1em] text-slate-500">Scan to verify</div></div>}
+        {qr ? <div className="shrink-0 text-center"><img src={qr} alt="Report verification QR" className="mx-auto size-24" /><div className="text-[9px] font-bold uppercase tracking-[.1em] text-slate-500">Scan to verify</div></div>
+          : qrPending && <div className="grid size-24 shrink-0 place-items-center border border-dashed border-slate-400 p-2 text-center text-[9px] font-semibold leading-snug text-slate-500">QR code added when back online</div>}
         <div className="grid flex-1 grid-cols-3 gap-6"><Signature label="Customer signature" name="" /><Signature label="Inspector name & signature" name={inspection.inspector} date={inspection.submittedAt} image={inspection.signature} /><Signature label="Approved by" name={certificate ? "Authorised reviewer" : "Awaiting approval"} date={certificate ? inspection.reviewedAt : undefined} /></div>
       </div>
       <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1.5 text-[9px] text-slate-500"><span>Laid out as F.581 · filled in by KTrack from tally sheet F.582 · demo report, fictional job{spec.sample ? ", sample limits" : ""}</span><span>Page 1 of 2</span></footer>
@@ -104,7 +105,7 @@ export function TallyReport({ inspection, record, certificate, equipment, qr }: 
 }
 
 // Print preview for one tally sheet's report; Print / Save PDF prints only this dialog (see .certificate-print-area in globals.css).
-export function TallyReportDialog({ inspectionId, qr, onClose }: { inspectionId: string; qr?: string; onClose: () => void }) {
+export function TallyReportDialog({ inspectionId, qr, qrPending, onClose }: { inspectionId: string; qr?: string; qrPending?: boolean; onClose: () => void }) {
   const { state } = useApp();
   const dialog = useRef<HTMLDialogElement>(null);
   const inspection = state.inspections.find((item) => item.id === inspectionId);
@@ -116,9 +117,9 @@ export function TallyReportDialog({ inspectionId, qr, onClose }: { inspectionId:
   if (!inspection || !record) return null;
   return createPortal(<><dialog ref={dialog} aria-label={`${record.assetRef} inspection report`} onClose={onClose} onClick={(event) => { if (event.target === event.currentTarget) event.currentTarget.close(); }} className="certificate-print-area animate-rise fixed inset-0 m-auto max-h-[95vh] w-[min(95vw,1000px)] overflow-auto bg-white p-5 backdrop:bg-black/50 sm:p-8">
     <div className="print-hidden mb-4 flex justify-end gap-2"><Button className="press" onClick={() => window.print()}><Printer data-icon="inline-start" />Print / Save PDF</Button><Button variant="outline" onClick={() => dialog.current?.close()}>Close</Button></div>
-    <TallyReport inspection={inspection} record={record} certificate={certificate} equipment={equipment} qr={qr} />
+    <TallyReport inspection={inspection} record={record} certificate={certificate} equipment={equipment} qr={qr} qrPending={qrPending} />
   </dialog>
   {/* The print copy: a modal dialog sits in the top layer, where Chrome ignores named pages, so the tally page would print portrait. */}
-  <div className="tally-print-copy"><TallyReport inspection={inspection} record={record} certificate={certificate} equipment={equipment} qr={qr} /></div>
+  <div className="tally-print-copy"><TallyReport inspection={inspection} record={record} certificate={certificate} equipment={equipment} qr={qr} qrPending={qrPending} /></div>
   </>, document.body);
 }

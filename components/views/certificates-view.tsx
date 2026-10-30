@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, Copy, ExternalLink, FileBadge, Printer, QrCode, ShieldCheck } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { useOnline } from "@/components/offline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +16,8 @@ import { qrFor, warrantyPrint } from "@/lib/qr";
 import { summarizeTally } from "@/lib/tally";
 import type { AssetRecord, Certificate } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
+
+const OFFLINE_QR = IS_AMS ? "QR codes come from our server, so this one needs the connection. The report still prints offline, and its QR is added when you're back online." : "QR codes come from our server, so this one needs the connection.";
 
 function snapshot(record: AssetRecord, certificate: Certificate, demoDate: string) {
   return { certificateNo: certificate.number, assetRef: record.assetRef, assetType: record.assetType, issuedDate: certificate.issuedDate, expiryDate: certificate.expiryDate, status: effectiveCertificateStatus(certificate, demoDate) };
@@ -35,7 +38,9 @@ export function CertificatesView() {
   // The QR opens in a dialog so a card with a QR stays the same size as its neighbours.
   const [qrOpen, setQrOpen] = useState<string>();
   // AMS prints the tally sheet's summary report, with the verification QR on it.
-  const [tallyPrint, setTallyPrint] = useState<{ inspectionId: string; qr: string }>();
+  // qr is empty while a report opened offline waits for the connection.
+  const [tallyPrint, setTallyPrint] = useState<{ inspectionId: string; recordId: string; certificateId: string; qr: string }>();
+  const online = useOnline();
   const [copied, setCopied] = useState(false);
   const qrDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (qrOpen) qrDialog.current?.showModal(); }, [qrOpen]);
@@ -63,11 +68,12 @@ export function CertificatesView() {
       const result = { image, url, key: JSON.stringify(payload), createdAt: Date.now() };
       setQr((current) => ({ ...current, [certificate.id]: result }));
       return result;
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "QR generation failed. Try again."); }
+    } catch (reason) { setError(!navigator.onLine ? OFFLINE_QR : reason instanceof Error ? reason.message : "QR generation failed. Try again."); }
     finally { setBusy(undefined); }
   }
 
   async function showQr(record: AssetRecord, certificate: Certificate) {
+    if (!currentQr(record, certificate) && !navigator.onLine) { setError(OFFLINE_QR); return; }
     if (currentQr(record, certificate) ?? await makeQr(record, certificate)) setQrOpen(certificate.id);
   }
 
@@ -79,15 +85,27 @@ export function CertificatesView() {
   // Superseding happens automatically when a newer certificate is approved, so revoke is the only manual status change.
   function revoke(record: AssetRecord, certificate: Certificate) {
     if (!window.confirm(`Revoke ${certificate.number} for ${record.assetRef}? This cannot be undone.`)) return;
-    if (update((current) => revokeCertificate(current, record.id, certificate.id))) void makeQr(record, { ...certificate, status: "Revoked" });
+    // Offline, the new status waits in the outbox; the QR is remade the next time it's shown.
+    if (update((current) => revokeCertificate(current, record.id, certificate.id)) && navigator.onLine) void makeQr(record, { ...certificate, status: "Revoked" });
   }
 
   async function print(record: AssetRecord, certificate: Certificate) {
-    const fresh = await makeQr(record, certificate);
     const inspection = state.inspections.find((item) => item.id === certificate.sourceInspectionId);
-    if (fresh && inspection?.joints) { setTallyPrint({ inspectionId: inspection.id, qr: fresh.image }); return; }
+    const tally = inspection?.joints ? { inspectionId: inspection.id, recordId: record.id, certificateId: certificate.id } : undefined;
+    // A tally report still opens and prints offline. Its QR comes from our server, so it is added once the laptop reconnects.
+    if (tally && !navigator.onLine) { setTallyPrint({ ...tally, qr: "" }); return; }
+    const fresh = await makeQr(record, certificate);
+    if (fresh && tally) { setTallyPrint({ ...tally, qr: fresh.image }); return; }
     if (fresh) setPrinting({ kind: "certificate", ...snapshot(record, certificate, state.demoDate), result: certificate.result, qr: fresh.image, site: record.site, serialNo: record.serialNo, inspector: inspection?.inspector, inspectorSignature: inspection?.signature, inspectedAt: inspection?.submittedAt, approvedAt: inspection?.reviewedAt, nextInspection: inspection?.nextInspectionDate ?? record.inspectionDueDate });
   }
+
+  // A report opened offline gets its QR as soon as the connection is back.
+  useEffect(() => {
+    if (!online || !tallyPrint || tallyPrint.qr) return;
+    const record = currentState.current.records.find((item) => item.id === tallyPrint.recordId);
+    const certificate = record?.certificates.find((item) => item.id === tallyPrint.certificateId);
+    if (record && certificate) void makeQr(record, certificate).then((fresh) => { if (fresh) setTallyPrint((current) => current?.certificateId === certificate.id ? { ...current, qr: fresh.image } : current); });
+  }, [online, tallyPrint]);
 
   async function printWarranty(record: AssetRecord) {
     setError(""); setBusy(`warranty:${record.id}`);
@@ -128,7 +146,7 @@ export function CertificatesView() {
         <Button variant="ghost" size="sm" onClick={() => qrDialog.current?.close()}>Close</Button>
       </div>
     </dialog>, document.body)}
-    {tallyPrint && <TallyReportDialog inspectionId={tallyPrint.inspectionId} qr={tallyPrint.qr} onClose={() => setTallyPrint(undefined)} />}
+    {tallyPrint && <TallyReportDialog inspectionId={tallyPrint.inspectionId} qr={tallyPrint.qr} qrPending={!tallyPrint.qr} onClose={() => setTallyPrint(undefined)} />}
     {printing && createPortal(<dialog ref={dialog} aria-label={printing.kind === "warranty" ? "Warranty print preview" : "Certificate print preview"} onClose={() => setPrinting(undefined)} className="certificate-print-area animate-rise fixed inset-0 m-auto max-h-[95vh] w-[min(95vw,850px)] overflow-auto bg-white p-5 backdrop:bg-black/50 sm:p-10">
       <div className="print-hidden mb-5 flex justify-end gap-2"><Button onClick={() => window.print()}>Print / Save PDF</Button><Button variant="outline" onClick={() => dialog.current?.close()}>Close</Button></div>
       {printing.kind === "warranty" ? <WarrantyDocument {...printing} /> : <div className="mx-auto border-[8px] border-[#0b3151] p-1"><div className="border border-[#b8cedc] p-5 sm:p-10">

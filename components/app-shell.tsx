@@ -7,6 +7,7 @@ import { RollingNumber } from "@/components/interior/value-flash";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, Building2, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Gauge, Import, Leaf, ListChecks, Menu, Ruler, Settings2, ShieldCheck, X } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
+import { InstallButton, OfflineBanner, useServiceWorker } from "@/components/offline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -117,6 +118,7 @@ function AppFrame({ initialView }: { initialView: string }) {
   const pathname = usePathname();
   const view = pathname?.split("/")[1] || initialView || "dashboard";
   const { state, setRole, saveError, storageWarning, hydrated } = useApp();
+  useServiceWorker(shownNav.map(({ id }) => `/${id}`));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -159,12 +161,13 @@ function AppFrame({ initialView }: { initialView: string }) {
         <span className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[.16em] text-[#80a9c2]">Sandbox</span>
         <Link href="/demo-controls" onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${view === "demo-controls" ? "text-[#0b3151]" : "text-[#d1e3ed] hover:bg-white/10 hover:text-white"}`}>{view === "demo-controls" && <NavPill />}<Settings2 className="relative size-[17px] transition-transform group-hover:rotate-45" /><span className="relative">Demo Controls</span></Link>
       </nav>
+      <InstallButton />
       <div className="border-t border-[#2a5774] px-2 pt-4 text-[11px] leading-relaxed text-[#9cbed2]"><div className="flex items-center gap-2"><Activity className="size-3" />Manual notifications only</div><div className="mt-1">v1.0 · {IS_FLS || IS_AMS ? "demo workspace" : "fictional demo data"}</div></div>
     </aside>
     {mobileOpen && <button className="fixed inset-0 z-30 bg-[#071d30]/50 lg:hidden" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <main inert={isMobile && mobileOpen ? true : undefined} className="min-w-0 flex-1">
       <header className="sticky top-0 z-20 border-b border-line bg-paper print-hidden"><div className="flex min-h-[76px] flex-col justify-center gap-3 px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-8 lg:px-10"><div className="flex min-w-0 items-center gap-3"><Button variant="ghost" size="icon" className="-ml-2 lg:hidden" ref={menuButton} aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu /></Button><div className="min-w-0"><div className="eyebrow">{meta.eyebrow}</div><h1 className="truncate text-xl font-bold tracking-[-.03em] text-navy sm:text-2xl">{meta.title}</h1></div></div><div className="flex items-center justify-end gap-2 sm:gap-3"><div className="text-right"><div className="eyebrow">Demo date</div><div className="text-xs font-bold text-navy sm:text-sm">{formatDate(state.demoDate)}</div></div>{!IS_FLS && <><label className="sr-only" htmlFor="role-switcher">Current role</label><Select id="role-switcher" value={state.role} onChange={(event) => setRole(event.target.value as Role)} className="w-[125px] bg-white text-xs font-semibold sm:w-[145px]"><option>Admin</option><option>Engineer</option><option>Reviewer</option><option>Manager</option></Select></>}</div></div></header>
-      <div className="mx-auto max-w-[1440px] px-5 py-7 sm:px-8 lg:px-10 lg:py-9"><div className="mb-7 max-w-3xl text-sm leading-relaxed text-slate-600">{meta.description}</div>{(saveError || storageWarning) && <div role="alert" className="mb-5 rounded-lg border border-[#f0c2c3] bg-[#fff3f3] p-4 text-sm text-danger">{saveError || storageWarning}{storageWarning && <Link className="ml-2 underline" href="/demo-controls">Open recovery controls</Link>}</div>}{hydrated ? <View view={view} /> : <p role="status">Restoring this browser workspace…</p>}</div>
+      <div className="mx-auto max-w-[1440px] px-5 py-7 sm:px-8 lg:px-10 lg:py-9"><div className="mb-7 max-w-3xl text-sm leading-relaxed text-slate-600">{meta.description}</div><OfflineBanner />{(saveError || storageWarning) && <div role="alert" className="mb-5 rounded-lg border border-[#f0c2c3] bg-[#fff3f3] p-4 text-sm text-danger">{saveError || storageWarning}{storageWarning && <Link className="ml-2 underline" href="/demo-controls">Open recovery controls</Link>}</div>}{hydrated ? <View view={view} /> : <p role="status">Restoring this browser workspace…</p>}</div>
     </main>
   </div>;
 }

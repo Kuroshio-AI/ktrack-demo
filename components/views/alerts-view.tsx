@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { acknowledgeAlert } from "@/lib/domain";
 import { EMAIL_CC, EMAIL_RECIPIENT, getEmailJsConfig, sendAlertEmail } from "@/lib/email";
+import { postWhatsAppAlert } from "@/lib/outbox";
 import type { Alert } from "@/lib/types";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
@@ -26,21 +27,15 @@ type WhatsAppConfigState = {
   message?: string;
 };
 
+const WHATSAPP_SETUP_KEY = "ktrack-whatsapp-configured";
+
 // "Sent by email and WhatsApp." — one plain line instead of a provider status per channel.
 function sentLine(email: boolean, whatsapp: boolean): string {
   return email && whatsapp ? "Sent by email and WhatsApp." : email ? "Sent by email." : whatsapp ? "Sent on WhatsApp." : "";
 }
 
-function whatsappError(status: number, serverMessage: string | undefined): string {
-  if (status === 429) return "WhatsApp needs a few seconds between messages. Try again shortly.";
-  if (status === 502) return "WhatsApp didn't accept the message. The access token may have expired; update it in Demo Controls.";
-  if (status === 503 && serverMessage?.includes("not configured")) return "WhatsApp isn't set up yet. See Demo Controls.";
-  if (status === 503) return "We couldn't confirm the WhatsApp message. Check WhatsApp before trying again.";
-  return serverMessage ?? "WhatsApp didn't go through. Try again.";
-}
-
 export function AlertsView() {
-  const { state, update, storageWarning } = useApp();
+  const { state, update, storageWarning, outbox, queue } = useApp();
   const [status, setStatus] = useState("open");
   const [type, setType] = useState("all");
   const [severity, setSeverity] = useState("all");
@@ -67,10 +62,15 @@ export function AlertsView() {
         const body: unknown = await response.json().catch(() => undefined);
         if (!response.ok || !body || typeof body !== "object") throw new Error("WhatsApp Cloud API configuration is unavailable.");
         const candidate = body as Record<string, unknown>;
+        try { localStorage.setItem(WHATSAPP_SETUP_KEY, String(candidate.configured === true)); } catch { /* only an offline convenience */ }
         if (!ignore) setWhatsappStatus({ phase: "ready", configured: candidate.configured === true });
       })
       .catch((reason) => {
-        if (!ignore && !(reason instanceof DOMException && reason.name === "AbortError")) setWhatsappStatus({ phase: "error", configured: false, message: "WhatsApp Cloud API configuration is unavailable." });
+        if (ignore || (reason instanceof DOMException && reason.name === "AbortError")) return;
+        // Offline, the last answer stands, so an alert can still be queued for WhatsApp.
+        let known: string | null = null;
+        try { known = localStorage.getItem(WHATSAPP_SETUP_KEY); } catch { /* treated as unknown */ }
+        setWhatsappStatus(!navigator.onLine && known !== null ? { phase: "ready", configured: known === "true" } : { phase: "error", configured: false, message: "WhatsApp Cloud API configuration is unavailable." });
       });
     return () => { ignore = true; controller.abort(); };
   }, []);
@@ -162,31 +162,8 @@ export function AlertsView() {
     whatsappInFlight.current = true;
     setWhatsAppFeedback(alert.id, { state: "sending", message: "" });
     const record = state.records.find((item) => item.id === alert.assetId);
-    const payload = {
-      alertId: alert.id,
-      event: alert.event,
-      assetRef: alert.assetRef?.trim() || "Not applicable",
-      site: record?.site.trim() || "Not applicable",
-      severity: alert.severity,
-      dueDate: alert.dueDate ?? "Not applicable",
-    };
     try {
-      let response: Response;
-      try {
-        response = await fetch("/api/alerts/whatsapp", {
-          method: "POST",
-          cache: "no-store",
-          headers: { Accept: "application/json", "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-      } catch {
-        throw new Error("We couldn't reach the server. Check WhatsApp before trying again.");
-      }
-      const body: unknown = await response.json().catch(() => undefined);
-      if (!response.ok || !body || typeof body !== "object" || (body as Record<string, unknown>).accepted !== true) {
-        const serverMessage = body && typeof body === "object" && typeof (body as Record<string, unknown>).error === "string" ? (body as Record<string, string>).error : undefined;
-        throw new Error(whatsappError(response.status, serverMessage));
-      }
+      if (await postWhatsAppAlert(alert, record?.site) === "offline") throw new Error("We couldn't reach the server. Check WhatsApp before trying again.");
       const acceptedAt = new Date().toISOString();
       const didPersist = update((current) => {
         if (!current.alerts.some((item) => item.id === alert.id)) return current;
@@ -205,7 +182,9 @@ export function AlertsView() {
   }
 
   // One click sends every channel that is set up and hasn't gone out yet for this alert.
+  // Offline, the alert waits in the outbox and goes out by itself when the laptop reconnects.
   async function sendAlert(alert: Alert, email: boolean, whatsapp: boolean) {
+    if (!navigator.onLine) { queue({ kind: "alert", alertId: alert.id, email, whatsapp }); return; }
     await Promise.all([email ? sendEmail(alert) : undefined, whatsapp ? sendWhatsAppAlert(alert) : undefined]);
   }
 
@@ -262,6 +241,7 @@ export function AlertsView() {
           const emailPending = emailConfigured && !emailSent;
           const whatsappPending = whatsappConfigured && !whatsappSent;
           const sending = feedback?.state === "sending" || whatsappAlertFeedback?.state === "sending";
+          const queued = outbox.some((item) => item.kind === "alert" && item.alertId === alert.id);
           const notes = [feedback, whatsappAlertFeedback].filter((item, index, all): item is EmailFeedback => Boolean(item?.message && item.state !== "sending" && all.findIndex((other) => other?.message === item.message) === index));
           return <motion.div key={alert.id} layout="position" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, transition: { duration: 0.12 } }} transition={{ type: "spring", stiffness: 520, damping: 34, mass: 0.45 }} className={`flex flex-col gap-3 rounded-lg border px-3 py-3 sm:flex-row sm:items-center sm:justify-between ${alert.status === "open" ? "border-line bg-white" : "border-line bg-paper opacity-80"}`}>
             <div className="flex min-w-0 items-start gap-3">
@@ -278,13 +258,14 @@ export function AlertsView() {
                 <div className="mt-1 text-[10px] uppercase tracking-[.08em] text-slate-400">{formatDateTime(alert.timestamp)}{alert.acknowledgedBy && alert.acknowledgedAt ? ` · acknowledged by ${alert.acknowledgedBy} at ${formatDateTime(alert.acknowledgedAt)}` : ""}</div>
                 <div aria-live="polite">
                   {(emailSent || whatsappSent) && <div className="mt-2 text-xs font-medium text-[#187348]" role="status">{sentLine(emailSent, whatsappSent)}</div>}
+                  {queued && <div className="mt-2 text-xs font-medium text-[#8a5d00]" role="status">Waits for the connection. It goes out by itself when this laptop is back online.</div>}
                   {notes.map((note) => <div key={note.message} className={`mt-1 text-xs ${note.state === "error" ? "text-danger" : "text-[#8a5d00]"}`} role={note.state === "error" ? "alert" : "status"}>{note.message}</div>)}
                 </div>
               </div>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               {state.role !== "Manager" && alert.status === "open" && !alert.acknowledgedAt && <Button variant="outline" size="sm" onClick={() => update((current) => acknowledgeAlert(current, alert.id))}><Check data-icon="inline-start" />Acknowledge</Button>}
-              {state.role !== "Manager" && (emailConfigured || whatsappConfigured) && <Button variant="outline" size="sm" disabled={Boolean(storageWarning) || isEmailSending || isWhatsAppSending || (!emailPending && !whatsappPending)} onClick={() => void sendAlert(alert, emailPending, whatsappPending)}><Send data-icon="inline-start" />{sending ? "Sending…" : !emailPending && !whatsappPending ? "Sent" : emailSent || whatsappSent ? "Retry" : "Send alert"}</Button>}
+              {state.role !== "Manager" && (emailConfigured || whatsappConfigured) && <Button variant="outline" size="sm" disabled={Boolean(storageWarning) || isEmailSending || isWhatsAppSending || queued || (!emailPending && !whatsappPending)} onClick={() => void sendAlert(alert, emailPending, whatsappPending)}><Send data-icon="inline-start" />{sending ? "Sending…" : queued ? "Queued" : !emailPending && !whatsappPending ? "Sent" : emailSent || whatsappSent ? "Retry" : "Send alert"}</Button>}
               {alert.status === "resolved" && <span className="flex items-center gap-1 text-xs font-semibold text-[#187348]"><RotateCcw className="size-3" />Resolved by condition</span>}
             </div>
           </motion.div>;
