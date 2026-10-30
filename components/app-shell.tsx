@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { motion, MotionConfig } from "motion/react";
 import { RollingNumber } from "@/components/interior/value-flash";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, Building2, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Gauge, Import, Leaf, ListChecks, Menu, Ruler, Settings2, ShieldCheck, X } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, Building2, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Gauge, Import, Leaf, ListChecks, Menu, Ruler, Settings2, ShieldCheck, UserCog, X } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { CustomerPortal } from "@/components/customer-portal";
 import { InstallButton, OfflineBanner, SyncConflicts, useServiceWorker } from "@/components/offline";
@@ -27,6 +27,7 @@ import { BuildingsView } from "@/components/views/buildings-view";
 import { ConnectionsView } from "@/components/views/connections-view";
 import { CriteriaView } from "@/components/views/criteria-view";
 import { EquipmentView } from "@/components/views/equipment-view";
+import { AccountsView } from "@/components/views/accounts-view";
 import { TallyView } from "@/components/views/tally-view";
 import { AMS_NAME, IS_AMS, IS_FLS, IS_TRIAL } from "@/lib/client";
 import type { Role } from "@/lib/types";
@@ -44,6 +45,7 @@ const nav = [
   { id: "warranties", label: "Warranties", icon: FileBadge },
   { id: "sustainability", label: "Sustainability", icon: Leaf },
   { id: "alerts", label: "Alerts", icon: BellRing },
+  { id: "accounts", label: "Accounts", icon: UserCog },
   { id: "import", label: "Import", icon: Import },
   { id: "demo-controls", label: "Demo Controls", icon: Settings2 },
 ] as const;
@@ -53,11 +55,11 @@ const FLS_VIEWS: string[] = ["dashboard", "register", "inspections", "approvals"
 const FLS_LABELS: Record<string, { label: string; icon?: typeof Building2 }> = { register: { label: "Buildings", icon: Building2 }, inspections: { label: "PPM checklists" } };
 // The AMS build: tally sheets checked against the dimension table, approved into numbered reports. No register, warranties or import page.
 // The trial drops the sandbox: Demo Controls would reset or restore one laptop behind the server's back, and savings don't sync.
-const AMS_VIEWS: string[] = ["dashboard", "inspections", "approvals", "certificates", "connections", "criteria", "equipment", "alerts", ...(IS_TRIAL ? [] : ["sustainability", "demo-controls"])];
+const AMS_VIEWS: string[] = ["dashboard", "inspections", "approvals", "certificates", "connections", "criteria", "equipment", "alerts", ...(IS_TRIAL ? ["accounts"] : ["sustainability", "demo-controls"])];
 const AMS_LABELS: Record<string, { label: string; icon?: typeof Building2 }> = { inspections: { label: "Tally sheets", icon: ClipboardList }, certificates: { label: "Reports", icon: FileCheck2 } };
 const shownNav = IS_FLS ? nav.filter(({ id }) => FLS_VIEWS.includes(id)).map((item) => ({ ...item, ...FLS_LABELS[item.id] }))
   : IS_AMS ? nav.filter(({ id }) => AMS_VIEWS.includes(id)).map((item) => ({ ...item, ...AMS_LABELS[item.id] }))
-  : nav.filter(({ id }) => id !== "connections" && id !== "criteria" && id !== "equipment");
+  : nav.filter(({ id }) => id !== "connections" && id !== "criteria" && id !== "equipment" && id !== "accounts");
 
 const titles: Record<string, { eyebrow: string; title: string; description: string }> = {
   import: { eyebrow: "Data intake", title: "Import", description: "Validate a register or sustainability savings spreadsheet and review the rows before importing." },
@@ -90,6 +92,7 @@ const amsTitles: typeof titles = {
   connections: { eyebrow: "Acceptance criteria", title: "Connections", description: "The dimension table: the limits for each size, weight, connection and grade. Tally sheets are checked against it." },
   criteria: { eyebrow: "Acceptance criteria", title: "Damage criteria", description: "What each condition code on the tally sheet records and what it does to the pipe. KTrack grades with these, and a change regrades the sheets still being filled in." },
   equipment: { eyebrow: "Calibration", title: "Equipment", description: "Every inspection instrument with its last calibration and next due date. Record a calibration when the certificate comes back; an expired instrument stops a tally sheet being submitted." },
+  accounts: { eyebrow: "Sign-in", title: "Accounts", description: "Who can sign in. Add a login for a customer, give anyone a new password, or remove a customer's login. A customer sees only their own company's jobs." },
   alerts: { eyebrow: "Attention queue", title: "Alerts", description: "Tally sheets waiting for review or returned for correction, instruments due for calibration, and reports nearing their expiry." },
   sustainability: titles.sustainability,
   "demo-controls": { eyebrow: "Scenario lab", title: "Demo Controls", description: "Load the client's dimension table, move the demo date, back up this workspace or reset it to the sample jobs." },
@@ -110,6 +113,7 @@ function View({ view }: { view: string }): ReactNode {
     case "warranties": return <WarrantiesView />;
     case "sustainability": return <SustainabilityView />;
     case "alerts": return <AlertsView />;
+    case "accounts": return IS_TRIAL ? <AccountsView /> : <DashboardView />;
     case "demo-controls": return <DemoControlsView />;
     case "import": return <ImportView />;
     default: return <DashboardView />;
@@ -161,7 +165,7 @@ function AppFrame({ initialView }: { initialView: string }) {
       <div className="mx-2 mt-8 rounded-lg border border-[#467493] bg-[#123e60] px-3 py-3"><div className="flex items-center justify-between"><span className="eyebrow text-[#bad2e1]">Environment</span><Badge variant="warning" className="px-2 py-0.5 text-[9px]">{IS_TRIAL ? "Trial" : "Demo mode"}</Badge></div><p className="mt-2 text-xs leading-relaxed text-[#d6e7f1]">{IS_TRIAL ? "Shared workspace. Records sync between laptops and stay on this one for offline work." : "Local-first workspace. Records stay in this browser."}</p></div>
       <nav className="mt-7 flex flex-1 flex-col gap-1" aria-label="Primary navigation">
         <span className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[.16em] text-[#80a9c2]">Workspace</span>
-        {shownNav.filter(({ id }) => id !== "demo-controls").map(({ id, label, icon: Icon }, index) => <Link ref={index === 0 ? firstNavLink : undefined} key={id} href={`/${id}`} onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${view === id ? "text-[#0b3151]" : "text-[#d1e3ed] hover:bg-white/10 hover:text-white"}`}>{view === id && <NavPill />}<Icon className="relative size-[17px] transition-transform group-hover:scale-110" aria-hidden="true" /><span className="relative">{label}</span>{id === "alerts" && openAlerts > 0 ? <span className={`relative ml-auto grid min-w-5 place-items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold ${view === id ? "bg-[#fde8e8] text-[#a52e35]" : "bg-[#d74349] text-white"}`}><RollingNumber value={openAlerts} /></span> : <ChevronRight className={`relative ml-auto size-3 -translate-x-1 opacity-0 transition-[opacity,transform] group-hover:translate-x-0 group-hover:opacity-60 ${view === id ? "hidden" : ""}`} />}</Link>)}
+        {shownNav.filter(({ id }) => id !== "demo-controls" && (id !== "accounts" || user?.role === "Admin")).map(({ id, label, icon: Icon }, index) => <Link ref={index === 0 ? firstNavLink : undefined} key={id} href={`/${id}`} onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${view === id ? "text-[#0b3151]" : "text-[#d1e3ed] hover:bg-white/10 hover:text-white"}`}>{view === id && <NavPill />}<Icon className="relative size-[17px] transition-transform group-hover:scale-110" aria-hidden="true" /><span className="relative">{label}</span>{id === "alerts" && openAlerts > 0 ? <span className={`relative ml-auto grid min-w-5 place-items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold ${view === id ? "bg-[#fde8e8] text-[#a52e35]" : "bg-[#d74349] text-white"}`}><RollingNumber value={openAlerts} /></span> : <ChevronRight className={`relative ml-auto size-3 -translate-x-1 opacity-0 transition-[opacity,transform] group-hover:translate-x-0 group-hover:opacity-60 ${view === id ? "hidden" : ""}`} />}</Link>)}
         {shownNav.some(({ id }) => id === "demo-controls") && <><Separator className="my-5 bg-[#2a5774]" />
         <span className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[.16em] text-[#80a9c2]">Sandbox</span>
         <Link href="/demo-controls" onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${view === "demo-controls" ? "text-[#0b3151]" : "text-[#d1e3ed] hover:bg-white/10 hover:text-white"}`}>{view === "demo-controls" && <NavPill />}<Settings2 className="relative size-[17px] transition-transform group-hover:rotate-45" /><span className="relative">Demo Controls</span></Link></>}

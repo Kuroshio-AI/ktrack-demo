@@ -28,3 +28,12 @@ export function formatDateTime(iso: string): string {
   const date = new Date(iso);
   return `${formatLocalDate(iso)}, ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
+
+// A password a person can read out or retype: 16 characters with no look-alikes (0/o, 1/l/i), in groups of four, about
+// 79 bits. Bytes from 248 up are skipped, so every character is equally likely.
+export function readablePassword(): string {
+  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+  let password = "";
+  while (password.length < 16) for (const byte of crypto.getRandomValues(new Uint8Array(32))) if (byte < 248 && password.length < 16) password += alphabet[byte % alphabet.length];
+  return password.match(/.{4}/g)!.join("-");
+}

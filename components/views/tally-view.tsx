@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AlertTriangle, ArrowRight, Check, ChevronRight, ClipboardList, FileText, Minus, Plus, Send, ShieldCheck, Trash2, X } from "lucide-react";
 import { useApp } from "@/components/app-provider";
+import { CustomerSelect } from "@/components/customer-select";
 import { RollingNumber } from "@/components/interior/value-flash";
 import { TallyPhotos } from "@/components/tally-photos";
 import { OUTCOME_TONE, TallyReportDialog } from "@/components/tally-report";
@@ -68,7 +69,6 @@ const STEP_LABEL: Record<(typeof CONNECTION_STEPS)[number], string> = { size: "P
 
 // The customers with a login, kept from the last time this laptop was online so the list still opens offline.
 const CUSTOMERS_KEY = "ktrack-customers";
-const OTHER_CUSTOMER = "__other";
 function savedCustomers(): string[] {
   try { const saved: unknown = JSON.parse(localStorage.getItem(CUSTOMERS_KEY) ?? "[]"); return Array.isArray(saved) ? saved.filter((name) => typeof name === "string") : []; } catch { return []; }
 }
@@ -84,7 +84,6 @@ function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; on
   const picked = pickConnection(connections, chosen ?? {});
   const choose = (field: (typeof CONNECTION_STEPS)[number], value: string) => { const spec = pickConnection(connections, { ...chosen, [field]: value }).spec; if (spec) setForm((current) => ({ ...current, connectionId: spec.id, nominalWall: spec.size === chosen?.size && spec.weight === chosen.weight ? current.nominalWall : lastWall(state, spec) })); };
   const [accounts, setAccounts] = useState(savedCustomers);
-  const [otherCustomer, setOtherCustomer] = useState(false);
   useEffect(() => {
     if (!IS_TRIAL) return;
     fetch("/api/customers").then((response) => response.ok ? response.json() as Promise<{ customers: string[] }> : undefined).then((body) => {
@@ -94,7 +93,6 @@ function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; on
     }).catch(() => { /* offline: the saved list stands */ });
   }, []);
   const customers = customerChoices(accounts, state.records.map((record) => record.owner));
-  const chooseCustomer = (value: string) => { setOtherCustomer(value === OTHER_CUSTOMER); setForm((current) => ({ ...current, customer: value === OTHER_CUSTOMER ? "" : value })); };
   // A real sheet is graded with the client's own damage criteria, so none opens while any are still the sample wording.
   const sampleCriteria = IS_TRIAL && (state.criteria ?? SAMPLE_CRITERIA).some((item) => item.sample);
   function create() {
@@ -117,12 +115,7 @@ function NewTally({ onCreated, onCancel }: { onCreated: (id: string) => void; on
       </fieldset> : <div className="sm:col-span-2 xl:col-span-8"><label className="eyebrow" htmlFor="tally-connection">Pipe and thread connection</label><Select id="tally-connection" className="mt-1.5" disabled><option>Import a dimension table first</option></Select></div>}
       {field("jobNo", "Work order", "xl:col-span-3")}
       <div className="xl:col-span-3"><label className="eyebrow" htmlFor="tally-customer">Customer</label>
-        <Select id="tally-customer" className="mt-1.5" value={otherCustomer ? OTHER_CUSTOMER : form.customer} onChange={(event) => chooseCustomer(event.target.value)}>
-          <option value="" disabled>Choose a customer…</option>
-          {customers.map((name) => <option key={name}>{name}</option>)}
-          <option value={OTHER_CUSTOMER}>Other customer…</option>
-        </Select>
-        {otherCustomer && <Input className="mt-2" aria-label="Customer name" value={form.customer} onChange={set("customer")} placeholder="Customer name…" autoComplete="off" autoFocus />}
+        <CustomerSelect id="tally-customer" value={form.customer} choices={customers} onChange={(customer) => setForm((current) => ({ ...current, customer }))} />
       </div>
       {field("rig", "Rig", "xl:col-span-3", { placeholder: "Rig SD-09" })}
       {field("well", "Well no.", "xl:col-span-3", { placeholder: "SD-09-01" })}

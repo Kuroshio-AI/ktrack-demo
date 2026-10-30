@@ -1,5 +1,6 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { IS_TRIAL } from "./client";
 
 // Trial sign-in: email and password accounts made by scripts/trial-accounts.mjs, never by signing up. Each account has
 // one role; a Customer account also names the customer (a job's Customer field) whose records it may read.
@@ -26,4 +27,12 @@ export async function sessionUser(request: Request): Promise<SessionUser | undef
   const session = await getAuth().api.getSession({ headers: request.headers });
   const user = session?.user as SessionUser | undefined;
   return user && (ACCOUNT_ROLES as readonly string[]).includes(user.role) ? user : undefined;
+}
+
+// The signed-in Admin, or the response that turns anyone else away. Off the trial there are no accounts to manage.
+export async function adminOnly(request: Request): Promise<SessionUser | Response> {
+  if (!IS_TRIAL) return new Response(null, { status: 404 });
+  const user = await sessionUser(request);
+  if (!user) return Response.json({ error: "Sign in again to manage accounts." }, { status: 401 });
+  return user.role === "Admin" ? user : Response.json({ error: "Only an Admin manages accounts." }, { status: 403 });
 }
