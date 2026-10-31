@@ -29,6 +29,9 @@ export function formatDateTime(iso: string): string {
   return `${formatLocalDate(iso)}, ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+// Better Auth's sign-in length rule, which the Accounts page also asks of a password an Admin types.
+export const PASSWORD_MIN = 12;
+
 // A password a person can read out or retype: 16 characters with no look-alikes (0/o, 1/l/i), in groups of four, about
 // 79 bits. Bytes from 248 up are skipped, so every character is equally likely.
 export function readablePassword(): string {

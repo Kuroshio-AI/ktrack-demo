@@ -1,6 +1,7 @@
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { IS_TRIAL } from "./client";
+import { PASSWORD_MIN } from "./utils";
 
 // Trial sign-in: email and password accounts made by scripts/trial-accounts.mjs, never by signing up. Each account has
 // one role; a Customer account also names the customer (a job's Customer field) whose records it may read.
@@ -9,7 +10,7 @@ export type AccountRole = (typeof ACCOUNT_ROLES)[number];
 
 export const authOptions = (database: BetterAuthOptions["database"]) => ({
   database,
-  emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: 12 },
+  emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: PASSWORD_MIN },
   user: { additionalFields: { role: { type: "string", required: true, input: false }, customer: { type: "string", required: false, input: false } } },
   // Inspectors work offline for days, so a session lasts 30 days and renews while in use.
   session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
@@ -36,3 +37,6 @@ export async function adminOnly(request: Request): Promise<SessionUser | Respons
   if (!user) return Response.json({ error: "Sign in again to manage accounts." }, { status: 401 });
   return user.role === "Admin" ? user : Response.json({ error: "Only an Admin manages accounts." }, { status: 403 });
 }
+
+// A password an Admin sets on the Accounts page, held to the length Better Auth asks for (128 is its own maximum).
+export const passwordError = (password: unknown) => typeof password === "string" && password.length >= PASSWORD_MIN && password.length <= 128 ? undefined : `A password needs at least ${PASSWORD_MIN} characters.`;
