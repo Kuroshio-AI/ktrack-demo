@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AMS_NAME } from "@/lib/client";
 import { customerShipments, shipmentTotals, type Shipment } from "@/lib/customer";
+import { qrFor } from "@/lib/qr";
 import { connectionLabel, FINAL_CLASSES } from "@/lib/tally";
 import type { CertificateStatus, FinalClass } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
@@ -65,13 +66,19 @@ const place = (item: Shipment) => [item.record.site, item.inspection.job?.well].
 
 export function CustomerPortal() {
   const { state, user, signOut, saveError } = useApp();
-  const [report, setReport] = useState<string>();
+  const [report, setReport] = useState<{ id: string; qr?: string }>();
   const shipments = customerShipments(state);
   const issued = shipments.filter((item) => item.certificate);
   const measuring = shipments.filter((item) => !item.certificate);
   const latest = issued.find((item) => item.status === "Valid" || item.status === "Expired") ?? issued[0];
   const totals = shipmentTotals(shipments);
-  const open = (item: Shipment) => <Button size="sm" variant="outline" className="press" onClick={() => setReport(item.inspection.id)}><FileText className="size-3.5" aria-hidden="true" />Open report</Button>;
+  // The QR comes from the server, so it appears a moment after the report opens; offline the report opens without one.
+  function show({ inspection, record, certificate, status }: Shipment) {
+    setReport({ id: inspection.id });
+    if (certificate && status) void qrFor({ certificateNo: certificate.number, assetRef: record.assetRef, assetType: record.assetType, issuedDate: certificate.issuedDate, expiryDate: certificate.expiryDate, status })
+      .then(({ image }) => setReport((current) => current?.id === inspection.id ? { ...current, qr: image } : current), () => undefined);
+  }
+  const open = (item: Shipment) => <Button size="sm" variant="outline" className="press" onClick={() => show(item)}><FileText className="size-3.5" aria-hidden="true" />Open report</Button>;
 
   return <div className="min-h-screen bg-paper">
     <header className="bg-[#0b3151] text-white print-hidden">
@@ -146,6 +153,6 @@ export function CustomerPortal() {
         </Card>}
       </div>}
     </main>
-    {report && <TallyReportDialog inspectionId={report} onClose={() => setReport(undefined)} />}
+    {report && <TallyReportDialog inspectionId={report.id} qr={report.qr} onClose={() => setReport(undefined)} />}
   </div>;
 }

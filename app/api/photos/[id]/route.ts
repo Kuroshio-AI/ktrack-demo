@@ -3,6 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { sessionUser } from "@/lib/auth";
 import { IS_TRIAL } from "@/lib/client";
 import { customerKey } from "@/lib/sync";
+import { verifyDemoToken } from "@/lib/tokens";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,13 +33,21 @@ export async function PUT(request: Request, { params }: Context) {
 export async function GET(request: Request, { params }: Context) {
   if (!IS_TRIAL) return new Response(null, { status: 404 });
   const user = await sessionUser(request);
-  if (!user) return new Response(null, { status: 401 });
+  const token = new URL(request.url).searchParams.get("token");
+  if (!user && !token) return new Response(null, { status: 401 });
   const { id } = await params;
   if (!validId(id)) return new Response(null, { status: 404 });
   const { env } = getCloudflareContext();
+  // Whoever scans a report's QR sees the photos on that report's tally sheet, and no others.
+  if (!user) {
+    const scanned = verifyDemoToken(token!, process.env.DEMO_CERT_TOKEN_SECRET ?? "");
+    const onReport = scanned.ok && await env.DB.prepare("SELECT 1 FROM item, json_each(item.data, '$.certificates') AS certificate, item AS sheet, json_each(sheet.data, '$.job.photos') AS photo WHERE item.kind = 'record' AND item.data IS NOT NULL AND json_extract(certificate.value, '$.number') = ? AND sheet.kind = 'inspection' AND sheet.id = json_extract(certificate.value, '$.sourceInspectionId') AND sheet.data IS NOT NULL AND json_extract(photo.value, '$.id') = ?")
+      .bind(scanned.snapshot.certificateNo, id).first();
+    if (!onReport) return new Response(null, { status: 404 });
+  }
   const photo = await env.PHOTOS.get(`photos/${id}`);
   if (!photo) return new Response(null, { status: 404 });
-  if (user.role === "Customer") {
+  if (user?.role === "Customer") {
     const sheet = await env.DB.prepare("SELECT customer FROM item WHERE kind = 'inspection' AND id = ?").bind(photo.customMetadata?.inspectionId ?? "").first<{ customer: string | null }>();
     if (!sheet?.customer || sheet.customer !== customerKey(user.customer)) return new Response(null, { status: 404 });
   }

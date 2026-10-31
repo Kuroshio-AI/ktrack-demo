@@ -1,9 +1,10 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ShieldAlert, ShieldCheck, ShieldMinus, ShieldX } from "lucide-react";
+import { VerifyReport } from "@/components/verify-report";
 import { AMS_NAME, IS_AMS, IS_TRIAL } from "@/lib/client";
 import { effectiveCertificateStatus, todayString } from "@/lib/domain";
 import { verifyLiveToken } from "@/lib/tokens";
-import type { Certificate, CertificateStatus } from "@/lib/types";
+import type { AssetRecord, Certificate, CertificateStatus, Inspection } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -29,19 +30,31 @@ const WARRANTY: Partial<Record<CertificateStatus, { title: string; detail: strin
   Revoked: { title: "Warranty revoked", detail: "This warranty has been withdrawn. Do not rely on it." },
 };
 
-// The trial reads the report's status from its records, so a QR printed before a withdrawal, replacement or expiry shows it.
-async function trialStatus(number: string): Promise<CertificateStatus | undefined> {
-  const row = await getCloudflareContext().env.DB.prepare("SELECT certificate.value AS certificate FROM item, json_each(item.data, '$.certificates') AS certificate WHERE item.kind = 'record' AND item.data IS NOT NULL AND json_extract(certificate.value, '$.number') = ?")
-    .bind(number).first<{ certificate: string }>();
-  return row ? effectiveCertificateStatus(JSON.parse(row.certificate) as Certificate, todayString()) : undefined;
+type Report = { inspection: Inspection; record: Pick<AssetRecord, "owner" | "assetRef" | "site">; certificate: Pick<Certificate, "number" | "issuedDate"> };
+
+// The trial reads the report from its records, so a QR printed before a withdrawal, replacement or expiry shows it, and
+// whoever scans it sees the report itself. The token only names the report; everything shown comes from the records.
+async function trialReport(number: string) {
+  const row = await getCloudflareContext().env.DB.prepare("SELECT item.data AS record, certificate.value AS certificate, sheet.data AS inspection FROM item, json_each(item.data, '$.certificates') AS certificate LEFT JOIN item AS sheet ON sheet.kind = 'inspection' AND sheet.id = json_extract(certificate.value, '$.sourceInspectionId') AND sheet.data IS NOT NULL WHERE item.kind = 'record' AND item.data IS NOT NULL AND json_extract(certificate.value, '$.number') = ?")
+    .bind(number).first<{ record: string; certificate: string; inspection: string | null }>();
+  if (!row) return undefined;
+  const record = JSON.parse(row.record) as AssetRecord;
+  const certificate = JSON.parse(row.certificate) as Certificate;
+  const sheet = row.inspection ? JSON.parse(row.inspection) as Inspection : undefined;
+  // The reviewer's notes on a returned sheet stay inside AMS.
+  const report: Report | undefined = sheet?.joints ? { inspection: { ...sheet, reviewerComment: undefined }, record: { owner: record.owner, assetRef: record.assetRef, site: record.site }, certificate: { number: certificate.number, issuedDate: certificate.issuedDate } } : undefined;
+  return { snapshot: { assetRef: record.assetRef, assetType: record.assetType, issuedDate: certificate.issuedDate, expiryDate: certificate.expiryDate, status: effectiveCertificateStatus(certificate, todayString()) }, report };
 }
 
 export default async function VerifyPage({ searchParams }: { searchParams: Promise<{ token?: string | string[] }> }) {
   const { token } = await searchParams;
-  let result = typeof token === "string" ? await verifyLiveToken(token, process.env.DEMO_CERT_TOKEN_SECRET ?? "") : { ok: false as const, error: "No token supplied" };
+  const signed = typeof token === "string" ? token : undefined;
+  let result = signed ? await verifyLiveToken(signed, process.env.DEMO_CERT_TOKEN_SECRET ?? "") : { ok: false as const, error: "No token supplied" };
+  let report: Report | undefined;
   if (IS_TRIAL && result.ok) {
-    const status = await trialStatus(result.snapshot.certificateNo);
-    result = status ? { ok: true, snapshot: { ...result.snapshot, status }, checkedAt: new Date().toISOString() } : { ok: false, error: `${AMS_NAME} has no report with this number. Do not rely on it.` };
+    const found = await trialReport(result.snapshot.certificateNo);
+    report = found?.report;
+    result = found ? { ok: true, snapshot: { ...result.snapshot, ...found.snapshot }, checkedAt: new Date().toISOString() } : { ok: false, error: `${AMS_NAME} has no report with this number. Do not rely on it.` };
   }
   const checked = result.ok ? result.checkedAt ?? result.snapshot.asOf : "";
   const warranty = result.ok && result.snapshot.kind === "warranty";
@@ -67,5 +80,12 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
         <p className="mt-6 border-t border-[#e1e9ee] pt-4 text-xs leading-relaxed text-slate-500">{IS_TRIAL ? "Inspection report" : `Demo ${warranty ? "warranty" : IS_AMS ? "report" : "certificate"}`} · {result.checkedAt ? "live status checked" : "status as of"} {formatDate(checked.slice(0, 10))}, {checked.slice(11, 16)} UTC.{!result.checkedAt && " This is a signed snapshot, not live certification."}</p>
       </div>}
     </div>
+    {/* The report is laid out like the paper form, so on a phone it scrolls sideways inside its frame. */}
+    {result.ok && report && <section aria-labelledby="report-heading" className="animate-rise mx-auto mt-8 max-w-[1040px]">
+      <h2 id="report-heading" className="text-center text-xs font-bold uppercase tracking-[.1em] text-slate-500">The report</h2>
+      <div role="region" aria-labelledby="report-heading" tabIndex={0} className="mt-3 overflow-x-auto rounded-2xl border border-[#d4e1e8] bg-white p-4 shadow-panel sm:p-6">
+        <div className="min-w-[880px]"><VerifyReport inspection={report.inspection} record={report.record} certificate={report.certificate} equipment={report.inspection.job?.equipment ?? []} photoToken={signed} /></div>
+      </div>
+    </section>}
   </main>;
 }

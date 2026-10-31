@@ -28,7 +28,8 @@ const Tick = ({ on, label }: { on: boolean; label: string }) => <li className="f
 
 // The F.581 summary report, filled from the tally: the same sections in the same order as the client's paper form, then the
 // F.582 tally itself as a landscape page. KTrack adds the report number, the QR code and the inspector's signature.
-export function TallyReport({ inspection, record, certificate, equipment, qr, qrPending }: { inspection: Inspection; record: AssetRecord; certificate?: Certificate; equipment: Equipment[]; qr?: string; qrPending?: boolean }) {
+// photoToken is the scanned QR's token, which lets the verify page show this report's photos without a sign-in.
+export function TallyReport({ inspection, record, certificate, equipment, qr, qrPending, photoToken }: { inspection: Inspection; record: Pick<AssetRecord, "owner" | "assetRef" | "site">; certificate?: Pick<Certificate, "number" | "issuedDate">; equipment: Equipment[]; qr?: string; qrPending?: boolean; photoToken?: string }) {
   const spec = inspection.connection;
   const job = inspection.job;
   const joints = inspection.joints ?? [];
@@ -108,7 +109,7 @@ export function TallyReport({ inspection, record, certificate, equipment, qr, qr
     {photos.length > 0 && <div className="photo-page mt-8 border-[3px] border-[#0b3151] p-4">
       <header className="flex items-end justify-between"><div><div className="text-sm font-black uppercase tracking-[.08em] text-navy">{AMS_NAME}</div><div className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-600">Photographs</div></div><div className="tally-mono text-right text-[10px] text-slate-600">{record.assetRef} · {record.owner}{certificate ? ` · ${certificate.number}` : ""}</div></header>
       <div className="mt-3 grid grid-cols-2 gap-3">{photos.map((photo) => <figure key={photo.id} className="break-inside-avoid border border-[#b9c6d0]">
-        <PhotoImage id={photo.id} alt={photoTitle(photo)} className="aspect-[4/3] w-full object-cover" />
+        <PhotoImage id={photo.id} token={photoToken} alt={photoTitle(photo)} className="aspect-[4/3] w-full object-cover" />
         <figcaption className="border-t border-[#b9c6d0] px-2 py-1 text-[10px]"><b className="tally-mono">{photo.pipe ? `Pipe ${photo.pipe}` : "Whole sheet"}</b>{photo.caption ? ` · ${photo.caption}` : ""}</figcaption>
       </figure>)}</div>
       <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1 text-[8px] text-slate-500"><span>Taken during inspection · {photos.length} photo{photos.length === 1 ? "" : "s"}</span><span>Page 3 of {pages}</span></footer>

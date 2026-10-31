@@ -18,8 +18,8 @@ import type { Inspection, TallyPhoto } from "@/lib/types";
 const pipeLabel = (photo: TallyPhoto) => photo.pipe ? `Pipe ${photo.pipe}` : "Whole sheet";
 export const photoTitle = (photo: TallyPhoto) => [pipeLabel(photo), photo.caption?.trim()].filter(Boolean).join(" · ");
 
-// The image from this laptop when it has it, otherwise from the trial's server.
-export function PhotoImage({ id, alt, className = "" }: { id: string; alt: string; className?: string }) {
+// The image from this laptop when it has it, otherwise from the trial's server; token is a scanned report's QR token.
+export function PhotoImage({ id, alt, className = "", token }: { id: string; alt: string; className?: string; token?: string }) {
   const [src, setSrc] = useState<string>();
   const [missing, setMissing] = useState(false);
   useEffect(() => {
@@ -28,11 +28,11 @@ export function PhotoImage({ id, alt, className = "" }: { id: string; alt: strin
     void loadPhoto(id).catch(() => undefined).then((image) => {
       if (!live) return;
       if (image) setSrc(url = URL.createObjectURL(image));
-      else if (IS_TRIAL) setSrc(`/api/photos/${encodeURIComponent(id)}`);
+      else if (IS_TRIAL) setSrc(`/api/photos/${encodeURIComponent(id)}${token ? `?token=${encodeURIComponent(token)}` : ""}`);
       else setMissing(true);
     });
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
-  }, [id]);
+  }, [id, token]);
   if (missing || !src) return <div className={`grid place-items-center bg-[#eef3f7] p-2 text-center text-[10px] font-semibold text-slate-500 ${missing ? "" : "animate-pulse"} ${className}`}>{missing ? (IS_TRIAL ? "Shows when online" : "On the laptop that took it") : ""}</div>;
   return <img src={src} alt={alt} className={className} onError={() => setMissing(true)} />;
 }

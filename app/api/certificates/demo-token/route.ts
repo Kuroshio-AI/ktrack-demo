@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { sessionUser } from "@/lib/auth";
 import { IS_TRIAL } from "@/lib/client";
 import { isDateString } from "@/lib/domain";
 import { uuidPattern } from "@/lib/field";
+import { customerKey } from "@/lib/sync";
 import { createDemoToken, statusIdFor, TRIAL_TOKEN_TTL_SECONDS } from "@/lib/tokens";
 
 export const runtime = "nodejs";
@@ -17,10 +19,13 @@ function isSafeText(value: unknown, max = 160): value is string {
 export async function POST(request: Request) {
   const secret = process.env.DEMO_CERT_TOKEN_SECRET;
   if (!secret || secret.length < 32) return NextResponse.json({ error: "DEMO_CERT_TOKEN_SECRET is missing or too short" }, { status: 503 });
-  // The demos make QR codes for anyone; on the trial a QR vouches for a real report, so only AMS staff make one.
+  // The demos make QR codes for anyone. On the trial a QR shows a real report to whoever scans it, so staff make one for
+  // any report and a customer only for a report on their own jobs.
+  let customer: string | undefined;
   if (IS_TRIAL) {
     const user = await sessionUser(request);
-    if (!user || user.role === "Customer") return NextResponse.json({ error: "Sign in as AMS staff to create a QR code." }, { status: user ? 403 : 401 });
+    if (!user) return NextResponse.json({ error: "Sign in again to create a QR code." }, { status: 401 });
+    if (user.role === "Customer") customer = customerKey(user.customer) ?? "";
   }
   if (!request.headers.get("content-type")?.toLowerCase().includes("application/json")) return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
   const text = await request.text();
@@ -33,6 +38,8 @@ export async function POST(request: Request) {
   if (!fields.every((field) => isSafeText(candidate[field])) || !datePattern.test(candidate.issuedDate as string) || !datePattern.test(candidate.expiryDate as string) || !isDateString(candidate.issuedDate) || !isDateString(candidate.expiryDate) || candidate.expiryDate < candidate.issuedDate || !statuses.has(candidate.status as string)
     || (candidate.kind !== undefined && (candidate.kind !== "warranty" || !["Valid", "Expired", "Revoked"].includes(candidate.status as string)))
     || (candidate.statusKey !== undefined && (typeof candidate.statusKey !== "string" || !uuidPattern.test(candidate.statusKey)))) return NextResponse.json({ error: "Snapshot contains invalid fields" }, { status: 400 });
+  if (customer !== undefined && !await getCloudflareContext().env.DB.prepare("SELECT 1 FROM item, json_each(item.data, '$.certificates') AS certificate WHERE item.kind = 'record' AND item.data IS NOT NULL AND item.customer = ? AND json_extract(certificate.value, '$.number') = ?").bind(customer, candidate.certificateNo).first())
+    return NextResponse.json({ error: "This report isn't on your account." }, { status: 403 });
   const configuredUrl = process.env.NEXT_PUBLIC_APP_URL;
   let origin: string;
   try { const url = new URL(configuredUrl || request.url); if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("protocol"); origin = url.origin; } catch { return NextResponse.json({ error: "NEXT_PUBLIC_APP_URL is invalid" }, { status: 500 }); }
