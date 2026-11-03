@@ -11,13 +11,17 @@ import { Signature, WarrantyDocument, type WarrantyPrint } from "@/components/wa
 import { effectiveCertificateStatus, revokeCertificate } from "@/lib/domain";
 import { qrFor, warrantyPrint } from "@/lib/qr";
 import type { AssetRecord, Certificate } from "@/lib/types";
+import { BRAND, IS_SAFEEN } from "@/lib/client";
+import { obligationFor } from "@/lib/safeen";
 import { formatDate } from "@/lib/utils";
+
+const RESULT_TEXT = { pass: "Pass", fail: "Fail", na: "N/A", pending: "Pending" };
 
 function snapshot(record: AssetRecord, certificate: Certificate, demoDate: string) {
   return { certificateNo: certificate.number, assetRef: record.assetRef, assetType: record.assetType, issuedDate: certificate.issuedDate, expiryDate: certificate.expiryDate, status: effectiveCertificateStatus(certificate, demoDate) };
 }
 type QrSnapshot = { image: string; url: string; key: string; createdAt: number };
-type PrintSnapshot = ReturnType<typeof snapshot> & { result: string; qr: string; site: string; serialNo?: string; inspector?: string; inspectorSignature?: string; inspectedAt?: string; approvedAt?: string; nextInspection?: string };
+type PrintSnapshot = ReturnType<typeof snapshot> & { result: string; qr: string; site: string; serialNo?: string; inspector?: string; inspectorSignature?: string; inspectedAt?: string; approvedAt?: string; nextInspection?: string; title: string; reference?: string; nextLabel: string; checks?: { label: string; result: string }[]; recorded: boolean };
 
 export function CertificatesView() {
   const { state, update } = useApp();
@@ -77,7 +81,10 @@ export function CertificatesView() {
   async function print(record: AssetRecord, certificate: Certificate) {
     const fresh = await makeQr(record, certificate);
     const inspection = state.inspections.find((item) => item.id === certificate.sourceInspectionId);
-    if (fresh) setPrinting({ kind: "certificate", ...snapshot(record, certificate, state.demoDate), result: certificate.result, qr: fresh.image, site: record.site, serialNo: record.serialNo, inspector: inspection?.inspector, inspectorSignature: inspection?.signature, inspectedAt: inspection?.submittedAt, approvedAt: inspection?.reviewedAt, nextInspection: inspection?.nextInspectionDate ?? record.inspectionDueDate });
+    if (fresh) setPrinting({ kind: "certificate", ...snapshot(record, certificate, state.demoDate), result: certificate.result, qr: fresh.image, site: record.site, serialNo: record.serialNo, inspector: inspection?.inspector, inspectorSignature: inspection?.signature, inspectedAt: inspection?.submittedAt, approvedAt: inspection?.reviewedAt, nextInspection: inspection?.nextInspectionDate ?? record.inspectionDueDate,
+      // SAFEEN prints the document the obligation calls for; a certificate imported from the register was issued elsewhere and is only recorded here.
+      ...(IS_SAFEEN ? { title: obligationFor(record).document, reference: obligationFor(record).reference, nextLabel: obligationFor(record).due } : { title: "Certificate of inspection", nextLabel: "Next inspection due" }),
+      checks: inspection?.checklist.map((item) => ({ label: item.label, result: RESULT_TEXT[item.result] })), recorded: !inspection });
   }
 
   async function printWarranty(record: AssetRecord) {
@@ -96,7 +103,7 @@ export function CertificatesView() {
           <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-paper p-3 text-sm"><div><div className="eyebrow">Issued</div><div className="mt-1 font-semibold text-navy">{formatDate(certificate.issuedDate)}</div></div><div><div className="eyebrow">Expires</div><div className="mt-1 font-semibold text-navy">{formatDate(certificate.expiryDate)}</div></div></div>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void print(record, certificate)}><Printer />Print</Button>
-            <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void printWarranty(record)}><FileBadge />{busy === `warranty:${record.id}` ? "Preparing…" : "Warranty"}</Button>
+            {!IS_SAFEEN && <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void printWarranty(record)}><FileBadge />{busy === `warranty:${record.id}` ? "Preparing…" : "Warranty"}</Button>}
             <Button variant="secondary" size="sm" disabled={Boolean(busy)} onClick={() => void showQr(record, certificate)}><QrCode />{busy === certificate.id ? "Generating…" : currentQr(record, certificate) ? "Show QR" : "Create QR"}</Button>
             {canChange && (details.status === "Valid" || details.status === "Expired") && <Button variant="ghost" size="sm" className="text-danger" disabled={Boolean(busy)} onClick={() => revoke(record, certificate)}>Revoke</Button>}
           </div>
@@ -120,12 +127,14 @@ export function CertificatesView() {
     {printing && createPortal(<dialog ref={dialog} aria-label={printing.kind === "warranty" ? "Warranty print preview" : "Certificate print preview"} onClose={() => setPrinting(undefined)} className="certificate-print-area animate-rise fixed inset-0 m-auto max-h-[95vh] w-[min(95vw,850px)] overflow-auto bg-white p-5 backdrop:bg-black/50 sm:p-10">
       <div className="print-hidden mb-5 flex justify-end gap-2"><Button onClick={() => window.print()}>Print / Save PDF</Button><Button variant="outline" onClick={() => dialog.current?.close()}>Close</Button></div>
       {printing.kind === "warranty" ? <WarrantyDocument {...printing} /> : <div className="mx-auto border-[8px] border-[#0b3151] p-1"><div className="border border-[#b8cedc] p-5 sm:p-10">
-        <div className="flex items-start justify-between gap-4"><div><div className="text-xs font-bold uppercase tracking-[.2em] text-accent">Kee Safety · KTrack</div><h2 className="mt-5 text-3xl font-black tracking-tight text-navy">Certificate of inspection</h2></div><Badge variant="warning">DEMO</Badge></div>
+        <div className="flex items-start justify-between gap-4"><div><div className="text-xs font-bold uppercase tracking-[.2em] text-accent">{BRAND.name} · KTrack</div><h2 className="mt-5 text-3xl font-black tracking-tight text-navy">{printing.title}</h2>{printing.reference && <p className="mt-1 text-sm text-slate-500">Checked to {printing.reference}</p>}</div><Badge variant="warning">DEMO</Badge></div>
         <dl className="mt-8 grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3">
           <div className="col-span-2"><dt className="eyebrow">Certificate number</dt><dd className="mt-1 break-all text-lg font-bold text-navy">{printing.certificateNo}</dd></div>
           <div><dt className="eyebrow">Result / status</dt><dd className="mt-1 text-lg font-bold text-navy">{printing.result} · {printing.status}</dd></div>
-          {[["Asset", `${printing.assetRef} · ${printing.assetType}`], ["Serial number", printing.serialNo ?? "Not supplied"], ["Site", printing.site], ["Issued", formatDate(printing.issuedDate)], ["Expires", formatDate(printing.expiryDate)], ["Next inspection due", printing.nextInspection ? formatDate(printing.nextInspection) : "Not scheduled"]].map(([label, value]) => <div key={label}><dt className="eyebrow">{label}</dt><dd className="mt-1 font-semibold text-navy">{value}</dd></div>)}
+          {[["Asset", `${printing.assetRef} · ${printing.assetType}`], ["Serial number", printing.serialNo ?? "Not supplied"], ["Site", printing.site], ["Issued", formatDate(printing.issuedDate)], ["Expires", formatDate(printing.expiryDate)], [printing.nextLabel, printing.nextInspection ? formatDate(printing.nextInspection) : "Not scheduled"]].map(([label, value]) => <div key={label}><dt className="eyebrow">{label}</dt><dd className="mt-1 font-semibold text-navy">{value}</dd></div>)}
         </dl>
+        {IS_SAFEEN && printing.checks?.length ? <table className="mt-8 w-full text-left text-sm"><thead><tr className="border-b border-line text-xs text-slate-500"><th className="py-2 font-semibold">Check</th><th className="py-2 text-right font-semibold">Result</th></tr></thead><tbody>{printing.checks.map((check) => <tr key={check.label} className="border-b border-line/70"><td className="py-1.5 pr-4 text-navy">{check.label}</td><td className="py-1.5 text-right font-semibold text-navy">{check.result}</td></tr>)}</tbody></table> : null}
+        {IS_SAFEEN && printing.recorded && <p className="mt-6 text-sm text-slate-600">Recorded from the issuer&apos;s certificate. The original is held on file.</p>}
         <div className="mt-8 flex flex-col gap-8 border-t border-line pt-6 sm:flex-row sm:items-end">
           <div className="shrink-0 text-center"><img src={printing.qr} alt="Certificate verification QR" className="mx-auto size-36" /><div className="eyebrow mt-1">Scan to verify</div></div>
           <div className="grid flex-1 gap-8 sm:grid-cols-2"><Signature label="Inspected by" name={printing.inspector ?? "Not recorded"} date={printing.inspectedAt} image={printing.inspectorSignature} /><Signature label="Approved by" name="Authorised reviewer" date={printing.approvedAt} /></div>

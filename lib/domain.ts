@@ -1,3 +1,6 @@
+import { IS_SAFEEN } from "./client";
+import { isSurvey } from "./survey";
+import { obligationFor, subseaChecklist } from "./safeen";
 import type {
   Activity,
   Alert,
@@ -95,6 +98,7 @@ export function validateStoredState(value: unknown): value is AppState {
       && (record.inspectionIntervalMonths === undefined || (Number.isSafeInteger(record.inspectionIntervalMonths) && record.inspectionIntervalMonths > 0))
       && isOptionalDate(record.inspectionDueDate) && isOptionalDate(record.licenceExpiryDate) && isOptionalDate(record.certificateIssuedDate) && isOptionalDate(record.certificateExpiryDate) && isOptionalDate(record.retirementDueDate)
       && (record.warranty === undefined || Boolean(record.warranty && typeof record.warranty === "object" && parseWarranty(record.warranty as Record<string, unknown>).warranty))
+      && (record.redTag === undefined || Boolean(record.redTag && typeof record.redTag === "object" && isDateString(record.redTag.date) && isText(record.redTag.reason) && (record.redTag.inspectionId === undefined || isText(record.redTag.inspectionId))))
       && Array.isArray(record.certificates) && record.certificates.every(isCertificate) && Array.isArray(record.activity) && record.activity.every(isActivity);
   };
   const isInspection = (item: unknown): boolean => {
@@ -126,6 +130,7 @@ export function validateStoredState(value: unknown): value is AppState {
   const counters = candidate.savingCounters;
   return candidate.version === STORAGE_VERSION
     && (candidate.savings === undefined || (Array.isArray(candidate.savings) && candidate.savings.every(isSaving)))
+    && (candidate.surveys === undefined || (Array.isArray(candidate.surveys) && candidate.surveys.every(isSurvey)))
     && (counters === undefined || (Boolean(counters) && typeof counters === "object" && !Array.isArray(counters) && Object.values(counters).every((count) => Number.isSafeInteger(count) && count >= 0)))
     && isDateString(candidate.demoDate)
     && isRole(candidate.role)
@@ -278,13 +283,20 @@ export function effectiveCertificateStatus(certificate: Certificate, demoDate: s
 
 type Deadline = { key: string; event: string; date: string; severity: AlertSeverity };
 
+export const OUT_OF_SERVICE = "Out of service";
+
 function recordDeadlines(record: AssetRecord, demoDate: string): Deadline[] {
   if (record.status === "Retired") return [];
   const deadlines: Deadline[] = [];
-  if (record.inspectionDueDate) deadlines.push({ key: "inspection", event: "Inspection due", date: record.inspectionDueDate, severity: "warning" });
-  if (record.licenceExpiryDate) deadlines.push({ key: "licence", event: "Licence expiry", date: record.licenceExpiryDate, severity: "critical" });
+  // Out of service outranks every date: it is already late, and stays the first thing shown until it clears.
+  if (record.redTag) deadlines.push({ key: `redtag:${record.redTag.inspectionId ?? record.redTag.date}`, event: OUT_OF_SERVICE, date: record.redTag.date, severity: "critical" });
+  // SAFEEN names each date by what is owed: a calibration, a thorough examination, a crew ticket.
+  const owed = IS_SAFEEN ? obligationFor(record).due : undefined;
+  if (record.inspectionDueDate) deadlines.push({ key: "inspection", event: owed ?? "Inspection due", date: record.inspectionDueDate, severity: "warning" });
+  if (record.licenceExpiryDate) deadlines.push({ key: "licence", event: owed ?? "Licence expiry", date: record.licenceExpiryDate, severity: "critical" });
   const currentCertificate = [...record.certificates].reverse().find((certificate) => certificate.status === "Valid" || certificate.status === "Expired");
-  if (currentCertificate) deadlines.push({ key: `certificate:${currentCertificate.id}`, event: "Certificate expiry", date: currentCertificate.expiryDate, severity: "critical" });
+  // In SAFEEN a certificate that runs out on the due date is that same obligation, not a second alert.
+  if (currentCertificate && !(IS_SAFEEN && currentCertificate.expiryDate === record.inspectionDueDate)) deadlines.push({ key: `certificate:${currentCertificate.id}`, event: "Certificate expiry", date: currentCertificate.expiryDate, severity: "critical" });
   if (record.retirementDueDate) deadlines.push({ key: "retirement", event: "Retirement due", date: record.retirementDueDate, severity: "warning" });
   // Only typed-in warranties, and only until they end: an expired 2018 warranty is history, not an action.
   const warranty = record.warranty && warrantyFor(record, demoDate);
@@ -294,19 +306,21 @@ function recordDeadlines(record: AssetRecord, demoDate: string): Deadline[] {
 
 // The most urgent obligation on a record, using the same dates as the alert tiers.
 export function nextDeadline(record: AssetRecord, demoDate: string): (Deadline & { days: number }) | undefined {
-  return recordDeadlines(record, demoDate).map((deadline) => ({ ...deadline, days: dateDiffDays(deadline.date, demoDate) })).sort((a, b) => a.days - b.days)[0];
+  return recordDeadlines(record, demoDate).map((deadline) => ({ ...deadline, days: dateDiffDays(deadline.date, demoDate) })).sort((a, b) => Number(b.event === OUT_OF_SERVICE) - Number(a.event === OUT_OF_SERVICE) || a.days - b.days)[0];
 }
 
 const dayCount = (days: number) => `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"}`;
 
 // Short timing for list rows: "Today", "In 30 days", "3 days overdue".
-export function deadlineWhen(days: number): string {
+export function deadlineWhen(days: number, event?: string): string {
+  if (event === OUT_OF_SERVICE) return days === 0 ? "Since today" : `For ${dayCount(days)}`;
   return days === 0 ? "Today" : days > 0 ? `In ${dayCount(days)}` : `${dayCount(days)} overdue`;
 }
 
 // Names the obligation, not just the timing: "Retirement due in 30 days", "Licence expired 2 days ago".
 export function deadlineLabel({ event, days }: { event: string; days: number }): string {
-  const noun = event.split(" ")[0];
+  if (event === OUT_OF_SERVICE) return `${OUT_OF_SERVICE} ${days === 0 ? "since today" : `for ${dayCount(days)}`}`;
+  const noun = event.replace(/ (due|expiry)$/, "");
   const expires = event.endsWith("expiry");
   if (days < 0) return expires ? `${noun} expired ${dayCount(days)} ago` : `${noun} ${dayCount(days)} overdue`;
   return `${noun} ${expires ? "expires" : "due"} ${days === 0 ? "today" : `in ${dayCount(days)}`}`;
@@ -338,7 +352,7 @@ export function recalculateAlerts(state: AppState, timestamp = nowIso()): AppSta
   return { ...state, alerts: next };
 }
 
-function activity(event: string, detail: string, actor: Role | "system", timestamp: string): Activity {
+export function activity(event: string, detail: string, actor: Role | "system", timestamp: string): Activity {
   return { id: makeId("activity"), event, detail, actor, timestamp };
 }
 
@@ -369,7 +383,7 @@ const DEFAULT_CHECKLIST = ["Identity and markings legible", "Components free fro
 export function createInspection(state: AppState, assetId: string, actor = state.role, timestamp = nowIso()): { state: AppState; inspection: Inspection } {
   const record = getRecord(state, assetId);
   if (record?.status !== "Active") throw new Error("Choose an active record to inspect.");
-  const checklist: ChecklistItem[] = DEFAULT_CHECKLIST.map((label, index) => ({ id: `check-${index + 1}`, label, result: "pending" }));
+  const checklist: ChecklistItem[] = (IS_SAFEEN ? subseaChecklist(record) : DEFAULT_CHECKLIST).map((label, index) => ({ id: `check-${index + 1}`, label, result: "pending" }));
   const inspection: Inspection = { id: makeId("inspection"), assetId, inspector: record.assignedEngineer || actor, checklist, notes: "", status: "Draft", createdAt: timestamp, updatedAt: timestamp };
   return { state: { ...state, inspections: [inspection, ...state.inspections] }, inspection };
 }
@@ -402,6 +416,31 @@ export function returnInspection(state: AppState, id: string, comment: string, a
   return { ...state, inspections: state.inspections.map((item) => item.id === id ? { ...item, status: "Returned", reviewerComment: comment.trim(), reviewedAt: timestamp, updatedAt: timestamp } : item), alerts: [...(returnedAlert ? [returnedAlert] : []), ...state.alerts.map((alert) => alert.occurrenceKey.startsWith(`review:${id}`) ? { ...alert, status: "resolved" as const } : alert)], activity: [activity("Inspection returned", comment.trim(), actor, timestamp), ...state.activity] };
 }
 
+// Anyone who finds a defect can tag the equipment out of service; only a passing inspection clears the tag.
+export function redTagRecord(state: AppState, recordId: string, reason: string, actor = state.role, timestamp = nowIso(), inspectionId?: string): AppState {
+  const record = getRecord(state, recordId);
+  if (!record || record.status !== "Active" || record.redTag || !reason.trim()) return state;
+  const redTag = { date: state.demoDate, reason: reason.trim(), ...(inspectionId ? { inspectionId } : {}) };
+  return recalculateAlerts({
+    ...state,
+    records: state.records.map((item) => item.id === record.id ? { ...item, redTag, activity: [activity("Taken out of service", redTag.reason, actor, timestamp), ...item.activity], updatedAt: timestamp } : item),
+    activity: [activity("Taken out of service", `${record.assetRef} · ${redTag.reason}`, actor, timestamp), ...state.activity],
+  }, timestamp);
+}
+
+// A failed check can take the equipment out of service from review: the work goes back for repair as well.
+export function redTagInspection(state: AppState, id: string, reason: string, actor = state.role, timestamp = nowIso()): AppState {
+  const inspection = state.inspections.find((item) => item.id === id);
+  if (!inspection || inspection.status !== "Submitted" || !reason.trim() || !inspection.checklist.some((item) => item.result === "fail")) return state;
+  const tagged = redTagRecord(state, inspection.assetId, reason, actor, timestamp, id);
+  if (tagged === state) return state;
+  return {
+    ...tagged,
+    inspections: tagged.inspections.map((item) => item.id === id ? { ...item, status: "Returned", reviewerComment: `Out of service: ${reason.trim()}`, reviewedAt: timestamp, updatedAt: timestamp } : item),
+    alerts: tagged.alerts.map((alert) => alert.occurrenceKey.startsWith(`review:${id}`) ? { ...alert, status: "resolved" as const } : alert),
+  };
+}
+
 export function approveInspection(state: AppState, id: string, expiryDate: string, actor = state.role, timestamp = nowIso()): AppState {
   const inspection = state.inspections.find((item) => item.id === id);
   if (!inspection || !inspection.checklist.length || inspection.status !== "Submitted" || !isDateString(expiryDate) || expiryDate < state.demoDate || inspection.checklist.some((item) => item.result === "fail" || item.result === "pending")) return state;
@@ -414,7 +453,7 @@ export function approveInspection(state: AppState, id: string, expiryDate: strin
   const next: AppState = {
     ...state,
     inspections: state.inspections.map((item) => item.id === id ? { ...item, status: "Issued", certificateId: certificate.id, nextInspectionDate, reviewedAt: timestamp, updatedAt: timestamp } : item),
-    records: state.records.map((item) => item.id === record.id ? { ...item, inspectionDueDate: nextInspectionDate, certificates: [...item.certificates.map((cert) => (cert.status === "Valid" || cert.status === "Expired") ? { ...cert, status: "Superseded" as const } : cert), certificate], certificateNo: certificate.number, certificateIssuedDate: certificate.issuedDate, certificateExpiryDate: certificate.expiryDate, activity: [activity("Certificate issued", certificate.number, actor, timestamp), ...item.activity], updatedAt: timestamp } : item),
+    records: state.records.map((item) => item.id === record.id ? { ...item, redTag: undefined, inspectionDueDate: nextInspectionDate, certificates: [...item.certificates.map((cert) => (cert.status === "Valid" || cert.status === "Expired") ? { ...cert, status: "Superseded" as const } : cert), certificate], certificateNo: certificate.number, certificateIssuedDate: certificate.issuedDate, certificateExpiryDate: certificate.expiryDate, activity: [activity("Certificate issued", certificate.number, actor, timestamp), ...item.activity], updatedAt: timestamp } : item),
     alerts: [certificateAlert(record, certificate, "Certificate issued", timestamp), ...record.certificates.filter((cert) => cert.status === "Valid" || cert.status === "Expired").map((cert) => certificateAlert(record, { ...cert, status: "Superseded" }, "Certificate superseded", timestamp)), ...state.alerts.map((alert): Alert => alert.occurrenceKey.startsWith(`review:${id}`) || alert.occurrenceKey.startsWith(`returned:${id}`) ? { ...alert, status: "resolved" } : alert)],
     activity: [activity("Certificate issued", `${record.assetRef} · ${certificate.number}`, actor, timestamp), ...state.activity],
   };
@@ -481,7 +520,7 @@ export const warrantyProduct = (assetType: string) => /horizontal lifeline/i.tes
 // One warranty per asset: the typed-in one, else 5 years from the first certificate so renewals don't restart it.
 export function warrantyFor(record: AssetRecord, demoDate: string): WarrantyDetails | undefined {
   const firstCertificate = record.certificates.map((item) => item.issuedDate).sort()[0];
-  const warranty = record.warranty ?? (firstCertificate ? { number: `WAR-${record.assetRef}`, product: warrantyProduct(record.assetType), warrantyDate: firstCertificate, years: 5 } : undefined);
+  const warranty = record.warranty ?? (!IS_SAFEEN && firstCertificate ? { number: `WAR-${record.assetRef}`, product: warrantyProduct(record.assetType), warrantyDate: firstCertificate, years: 5 } : undefined);
   if (!warranty) return undefined;
   const validUntil = addMonthsClamped(warranty.warrantyDate, warranty.years * 12);
   return { ...warranty, validUntil, status: record.warranty?.revokedDate ? "Revoked" : demoDate > validUntil ? "Expired" : "Valid", typedIn: Boolean(record.warranty) };

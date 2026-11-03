@@ -1,6 +1,7 @@
 import { ShieldAlert, ShieldCheck, ShieldMinus, ShieldX } from "lucide-react";
 import { verifyDemoToken } from "@/lib/tokens";
 import type { CertificateStatus } from "@/lib/types";
+import { BRAND } from "@/lib/client";
 import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +28,7 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
   return <main className="min-h-screen bg-[#f3f7f9] px-4 py-10 sm:py-14">
     <div className="animate-rise mx-auto max-w-md overflow-hidden rounded-2xl border border-[#d4e1e8] bg-white shadow-panel">
       <div className={`px-6 pb-8 pt-7 text-center ${tone.band}`}>
-        <div className="text-[11px] font-bold uppercase tracking-[.18em] text-[#1684ab]">Kee Safety · KTrack</div>
+        <div className="text-[11px] font-bold uppercase tracking-[.18em] text-[#1684ab]">{BRAND.name} · KTrack</div>
         <span className={`pop-in mx-auto mt-7 grid size-24 place-items-center rounded-full text-white shadow-lg ring-8 ring-white ${tone.badge}`}><Icon className="size-12" aria-hidden="true" /></span>
         <h1 className="mt-5 text-3xl font-bold tracking-[-.03em] text-[#0b3151]">{tone.title}</h1>
         <p className="mt-2 text-sm text-slate-600">{tone.detail}</p>

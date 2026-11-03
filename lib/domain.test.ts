@@ -112,5 +112,5 @@ test("deadline labels say which obligation is due and when", () => {
   assert.equal(deadlineLabel({ event: "Inspection due", days: -3 }), "Inspection 3 days overdue");
   assert.equal(deadlineLabel({ event: "Licence expiry", days: 1 }), "Licence expires in 1 day");
   assert.equal(deadlineLabel({ event: "Certificate expiry", days: -2 }), "Certificate expired 2 days ago");
-  assert.deepEqual([0, 30, 1, -3].map(deadlineWhen), ["Today", "In 30 days", "In 1 day", "3 days overdue"]);
+  assert.deepEqual([0, 30, 1, -3].map((days) => deadlineWhen(days)), ["Today", "In 30 days", "In 1 day", "3 days overdue"]);
 });

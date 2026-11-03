@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { Camera, Check, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { SafeenMark } from "@/components/safeen-mark";
+import { BRAND, IS_SAFEEN } from "@/lib/client";
 import { MAX_PHONE_PHOTOS, type FieldJob, type FieldResult } from "@/lib/field";
 import { photoBytes, shrinkPhoto } from "@/lib/photos";
 
@@ -113,13 +115,13 @@ export function FieldInspection({ id }: { id: string }) {
   const ready = job && job.checklist.every((item) => results[item.id]) && signature;
   return <main className="min-h-screen bg-[#f3f7f9] px-4 py-6" style={zoom === 1 ? undefined : { zoom }}>
     <div className="mx-auto max-w-md">
-      <div className="flex items-center gap-3"><img src="/kee-safety-logo.png" alt="Kee Safety" className="size-10" /><div><div className="text-[11px] font-bold uppercase tracking-[.18em] text-[#1684ab]">KTrack · Field inspection</div>{job && <div className="text-xs text-slate-500">Inspector: {job.inspector}</div>}</div></div>
+      <div className="flex items-center gap-3">{IS_SAFEEN ? <span className="grid size-10 place-items-center rounded-xl bg-navy text-white"><SafeenMark /></span> : <img src="/kee-safety-logo.png" alt="Kee Safety" className="size-10" />}<div><div className="text-[11px] font-bold uppercase tracking-[.18em] text-[#1684ab]">KTrack · Field inspection</div>{job && <div className="text-xs text-slate-500">Inspector: {job.inspector}</div>}</div></div>
       {screen === "loading" && <p className="mt-10 text-center text-sm text-slate-500" aria-live="polite">Opening inspection…</p>}
       {screen === "closed" && <div className="animate-rise mt-8 rounded-2xl border border-line bg-white p-6 text-center shadow-panel"><h1 className="text-xl font-bold text-navy">{closedTitle}</h1><p className="mt-2 text-sm text-slate-600" role="alert">{message}</p></div>}
       {screen === "sent" && job && <div className="animate-rise mt-8 rounded-2xl border border-line bg-white p-8 text-center shadow-panel">
         <span className="pop-in mx-auto grid size-20 place-items-center rounded-full bg-success text-white ring-8 ring-success/10"><Check className="draw-check size-10" strokeWidth={3} aria-hidden="true" /></span>
         <h1 className="mt-5 text-2xl font-bold tracking-tight text-navy">Sent for review</h1>
-        <p className="mt-2 text-sm text-slate-600">{job.assetRef} is now in Kee Safety’s approval queue. You can close this page.</p>
+        <p className="mt-2 text-sm text-slate-600">{job.assetRef} is now in {BRAND.name}’s approval queue. You can close this page.</p>
       </div>}
       {screen === "form" && job && <form className="animate-rise mt-5 flex flex-col gap-4" onSubmit={(event) => { event.preventDefault(); if (ready) void submit(); }}>
         <div className="rounded-2xl border border-line bg-white p-5 shadow-panel">

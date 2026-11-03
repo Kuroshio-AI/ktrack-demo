@@ -1,3 +1,4 @@
+import type { Survey } from "./survey";
 export const REGISTER_HEADERS = [
   "asset_ref",
   "record_type",
@@ -99,9 +100,14 @@ export type Saving = {
   updatedAt: string;
 };
 
+// Set when a reviewer takes failed equipment out of service; only a passing, issued inspection clears it.
+// inspectionId is set when a failed inspection raised the tag; a tag put on from the deck has none.
+export type RedTag = { date: string; reason: string; inspectionId?: string };
+
 export type AssetRecord = RegisterRow & {
   id: string;
   warranty?: Warranty;
+  redTag?: RedTag;
   certificates: Certificate[];
   activity: Activity[];
   createdAt: string;
@@ -180,6 +186,8 @@ export type AppState = {
   savings?: Saving[];
   // Last saving number issued per year, so a removed saving's certificate number is never handed out again.
   savingCounters?: Record<string, number>;
+  // SAFEEN pipeline and riser survey tallies; optional so older workspaces stay valid.
+  surveys?: Survey[];
 };
 
 export type ImportError = {

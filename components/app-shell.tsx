@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Import, Leaf, Menu, Settings2, ShieldCheck, X } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, Map as MapIcon, BellRing, BookOpenCheck, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Import, Leaf, Menu, Waves, Settings2, ShieldCheck, X } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,12 +19,18 @@ import { WarrantiesView } from "@/components/views/warranties-view";
 import { SustainabilityView } from "@/components/views/sustainability-view";
 import { AlertsView } from "@/components/views/alerts-view";
 import { DemoControlsView } from "@/components/views/demo-controls-view";
+import { FleetMapView } from "@/components/views/fleet-map-view";
+import { SurveysView } from "@/components/views/surveys-view";
+import { SafeenMark } from "@/components/safeen-mark";
+import { BRAND, HIDDEN_VIEWS, IS_SAFEEN } from "@/lib/client";
 import type { Role } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 const nav = [
   { id: "dashboard", label: "Dashboard", icon: BarChart3 },
   { id: "register", label: "Register", icon: ClipboardList },
+  { id: "spreads", label: "Spreads", icon: MapIcon },
+  { id: "surveys", label: "Surveys", icon: Waves },
   { id: "inspections", label: "Inspections", icon: CalendarCheck },
   { id: "approvals", label: "Approvals", icon: BookOpenCheck },
   { id: "certificates", label: "Certificates", icon: ShieldCheck },
@@ -35,21 +41,39 @@ const nav = [
   { id: "demo-controls", label: "Demo Controls", icon: Settings2 },
 ] as const;
 
+const shownNav = nav.filter(({ id }) => !HIDDEN_VIEWS.includes(id)).map((item) => IS_SAFEEN && item.id === "register" ? { ...item, label: "Equipment" } : item);
+
+// Kee keeps its navy sidebar; SAFEEN's sits on the page ground with a grey pill for the active screen.
+const SIDE = IS_SAFEEN ? {
+  aside: "border-line bg-[#f4f7f8] text-navy", mark: "bg-navy text-white", tagline: "text-slate-500", close: "text-navy hover:bg-black/5",
+  env: "border-line bg-white", envLabel: "text-slate-500", envText: "text-slate-600", group: "text-slate-500 normal-case tracking-normal text-xs font-semibold",
+  active: "bg-[#e3e9ec] text-navy", idle: "text-slate-600 hover:bg-black/5 hover:text-navy", count: "bg-danger text-white", countActive: "bg-danger text-white", rule: "bg-line", foot: "border-line text-slate-500",
+} : {
+  aside: "border-[#17496d] bg-[#0b3151] text-white", mark: "bg-white text-[#0b3151] shadow-lg", tagline: "text-[#a8c7dd]", close: "text-white hover:bg-white/10",
+  env: "border-[#467493] bg-[#123e60]", envLabel: "text-[#bad2e1]", envText: "text-[#d6e7f1]", group: "text-[#80a9c2] uppercase tracking-[.16em] text-[10px] font-bold",
+  active: "bg-white text-[#0b3151]", idle: "text-[#d1e3ed] hover:bg-white/10 hover:text-white", count: "bg-[#d74349] text-white", countActive: "bg-[#fde8e8] text-[#a52e35]", rule: "bg-[#2a5774]", foot: "border-[#2a5774] text-[#9cbed2]",
+};
+
 const titles: Record<string, { eyebrow: string; title: string; description: string }> = {
-  import: { eyebrow: "Data intake", title: "Import", description: "Validate a register or sustainability savings spreadsheet and review the rows before importing." },
+  import: { eyebrow: "Data intake", title: "Import", description: IS_SAFEEN ? "Validate an equipment register spreadsheet and review the rows before importing." : "Validate a register or sustainability savings spreadsheet and review the rows before importing." },
   dashboard: { eyebrow: "Operations overview", title: "Dashboard", description: "Deadlines, review work and recent movement for this demo date." },
-  register: { eyebrow: "Asset register", title: "Asset register", description: "Search equipment, licences and their linked obligations." },
-  inspections: { eyebrow: "Field work", title: "Inspections", description: "Draft a mobile-friendly checklist, then send it for review." },
-  approvals: { eyebrow: "Quality gate", title: "Approvals", description: "Return work with a correction, or issue a certificate with an explicit expiry." },
+  register: IS_SAFEEN ? { eyebrow: "Equipment register", title: "Equipment", description: "ROVs, tooling, lifting gear, survey sensors and crew competences, with the certificate or calibration each one needs." } : { eyebrow: "Asset register", title: "Asset register", description: "Search equipment, licences and their linked obligations." },
+  surveys: { eyebrow: "ROV inspection", title: "Surveys", description: "Tally CP, wall thickness and anode readings point by point along a line or riser, then issue the survey report." },
+  spreads: { eyebrow: "Positioning", title: "Spreads", description: "Where each vessel and the base are working, and what on board is out of date." },
+  inspections: IS_SAFEEN ? { eyebrow: "Field work", title: "Inspections", description: "Run the pre-dive, calibration or lifting checklist for the equipment type, on deck or on a phone, then send it for review." } : { eyebrow: "Field work", title: "Inspections", description: "Draft a mobile-friendly checklist, then send it for review." },
+  approvals: IS_SAFEEN ? { eyebrow: "Quality gate", title: "Approvals", description: "Issue the certificate, return the work for a correction, or take failed equipment out of service." } : { eyebrow: "Quality gate", title: "Approvals", description: "Return work with a correction, or issue a certificate with an explicit expiry." },
   certificates: { eyebrow: "Attestation", title: "Certificates", description: "Print a branded demo certificate and share a time-bound public snapshot." },
   warranties: { eyebrow: "Product warranty", title: "Warranties", description: "Type in a warranty from its original document to reissue it in the Kee format and track when it ends." },
   sustainability: { eyebrow: "Use less · Move less · Waste less", title: "Sustainability", description: "Record an environmental saving, print its certificate and see the quarter's total CO₂e." },
   alerts: { eyebrow: "Attention queue", title: "Alerts", description: "Acknowledge an alert without losing the underlying obligation." },
-  "demo-controls": { eyebrow: "Scenario lab", title: "Demo Controls", description: "Download templates and sample data, change the demo date and exercise the main workflows." },
+  "demo-controls": { eyebrow: "Scenario lab", title: "Demo Controls", description: IS_SAFEEN ? "Load the SAFEEN demo, download templates, change the demo date and exercise the main workflows." : "Download templates and sample data, change the demo date and exercise the main workflows." },
 };
 
 function View({ view }: { view: string }): ReactNode {
+  if (HIDDEN_VIEWS.includes(view)) return <DashboardView />;
   switch (view) {
+    case "spreads": return <FleetMapView />;
+    case "surveys": return <SurveysView />;
     case "dashboard": return <DashboardView />;
     case "register": return <RegisterView />;
     case "inspections": return <InspectionsView />;
@@ -90,27 +114,27 @@ function AppFrame({ initialView }: { initialView: string }) {
     document.addEventListener("keydown", onKey); firstNavLink.current?.focus();
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = previousOverflow; menuButton.current?.focus(); };
   }, [mobileOpen, isMobile]);
-  const meta = titles[view] ?? titles.dashboard;
+  const meta = (!HIDDEN_VIEWS.includes(view) && titles[view]) || titles.dashboard;
   const openAlerts = state.alerts.filter((alert) => alert.status === "open").length;
 
   return <div className="app-grid min-h-screen lg:flex">
-    <aside ref={sidebar} aria-hidden={isMobile && !mobileOpen} inert={isMobile && !mobileOpen ? true : undefined} className={`fixed inset-y-0 left-0 z-40 flex w-[268px] flex-col border-r border-[#17496d] bg-[#0b3151] px-4 py-5 text-white transition-transform lg:static lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+    <aside ref={sidebar} aria-hidden={isMobile && !mobileOpen} inert={isMobile && !mobileOpen ? true : undefined} className={`fixed inset-y-0 left-0 z-40 flex w-[268px] flex-col border-r ${SIDE.aside} px-4 py-5 transition-transform lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 lg:overflow-y-auto ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="flex items-center justify-between px-2">
         <Link href="/dashboard" onClick={() => setMobileOpen(false)} className="flex items-center gap-3 focus-ring rounded-md">
-          <span className="grid size-10 place-items-center rounded-xl bg-white text-[#0b3151] shadow-lg"><span className="text-xl font-black">K</span></span>
-          <span><span className="block text-[19px] font-bold tracking-[-.03em]">KTrack</span><span className="block text-[10px] font-bold uppercase tracking-[.15em] text-[#a8c7dd]">Kee Safety operations</span></span>
+          <span className={`grid size-10 place-items-center rounded-xl ${SIDE.mark}`}>{IS_SAFEEN ? <SafeenMark /> : <span className="text-xl font-black">{BRAND.mark}</span>}</span>
+          <span><span className="block text-[19px] font-bold tracking-[-.03em]">KTrack</span><span className={`block text-[10px] font-bold uppercase tracking-[.15em] ${SIDE.tagline}`}>{BRAND.tagline}</span></span>
         </Link>
-        <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 lg:hidden" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X /></Button>
+        <Button variant="ghost" size="icon" className={`${SIDE.close} lg:hidden`} aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X /></Button>
       </div>
-      <div className="mx-2 mt-8 rounded-lg border border-[#467493] bg-[#123e60] px-3 py-3"><div className="flex items-center justify-between"><span className="eyebrow text-[#bad2e1]">Environment</span><Badge variant="warning" className="px-2 py-0.5 text-[9px]">Demo mode</Badge></div><p className="mt-2 text-xs leading-relaxed text-[#d6e7f1]">Local-first workspace. Records stay in this browser.</p></div>
+      <div className={`mx-2 mt-8 rounded-lg border px-3 py-3 ${SIDE.env}`}><div className="flex items-center justify-between"><span className={`eyebrow ${SIDE.envLabel}`}>Environment</span><Badge variant="warning" className="px-2 py-0.5 text-[9px]">Demo mode</Badge></div><p className={`mt-2 text-xs leading-relaxed ${SIDE.envText}`}>Local-first workspace. Records stay in this browser.</p></div>
       <nav className="mt-7 flex flex-1 flex-col gap-1" aria-label="Primary navigation">
-        <span className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[.16em] text-[#80a9c2]">Workspace</span>
-        {nav.filter(({ id }) => id !== "demo-controls").map(({ id, label, icon: Icon }, index) => <Link ref={index === 0 ? firstNavLink : undefined} key={id} href={`/${id}`} onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${view === id ? "bg-white text-[#0b3151]" : "text-[#d1e3ed] hover:bg-white/10 hover:text-white"}`}><Icon className="size-[17px]" aria-hidden="true" /><span>{label}</span>{id === "alerts" && openAlerts > 0 ? <span className={`ml-auto grid min-w-5 place-items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold ${view === id ? "bg-[#fde8e8] text-[#a52e35]" : "bg-[#d74349] text-white"}`}>{openAlerts}</span> : <ChevronRight className={`ml-auto size-3 opacity-0 transition-opacity group-hover:opacity-60 ${view === id ? "hidden" : ""}`} />}</Link>)}
-        <Separator className="my-5 bg-[#2a5774]" />
-        <span className="px-3 pb-2 text-[10px] font-bold uppercase tracking-[.16em] text-[#80a9c2]">Sandbox</span>
-        <Link href="/demo-controls" onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold ${view === "demo-controls" ? "bg-white text-[#0b3151]" : "text-[#d1e3ed] hover:bg-white/10 hover:text-white"}`}><Settings2 className="size-[17px]" /><span>Demo Controls</span></Link>
+        <span className={`px-3 pb-2 ${SIDE.group}`}>Workspace</span>
+        {shownNav.filter(({ id }) => id !== "demo-controls").map(({ id, label, icon: Icon }, index) => <Link ref={index === 0 ? firstNavLink : undefined} key={id} href={`/${id}`} onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${view === id ? SIDE.active : SIDE.idle}`}><Icon className="size-[17px]" aria-hidden="true" /><span>{label}</span>{id === "alerts" && openAlerts > 0 ? <span className={`ml-auto grid min-w-5 place-items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold ${view === id ? SIDE.countActive : SIDE.count}`}>{openAlerts}</span> : <ChevronRight className={`ml-auto size-3 opacity-0 transition-opacity group-hover:opacity-60 ${view === id ? "hidden" : ""}`} />}</Link>)}
+        <Separator className={`my-5 ${SIDE.rule}`} />
+        <span className={`px-3 pb-2 ${SIDE.group}`}>Sandbox</span>
+        <Link href="/demo-controls" onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold ${view === "demo-controls" ? SIDE.active : SIDE.idle}`}><Settings2 className="size-[17px]" /><span>Demo Controls</span></Link>
       </nav>
-      <div className="border-t border-[#2a5774] px-2 pt-4 text-[11px] leading-relaxed text-[#9cbed2]"><div className="flex items-center gap-2"><Activity className="size-3" />Manual notifications only</div><div className="mt-1">v1.0 · fictional demo data</div></div>
+      <div className={`border-t px-2 pt-4 text-[11px] leading-relaxed ${SIDE.foot}`}><div className="flex items-center gap-2"><Activity className="size-3" />Manual notifications only</div><div className="mt-1">v1.0 · fictional demo data</div></div>
     </aside>
     {mobileOpen && <button className="fixed inset-0 z-30 bg-[#071d30]/50 lg:hidden" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <main inert={isMobile && mobileOpen ? true : undefined} className="min-w-0 flex-1">

@@ -10,14 +10,15 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 # Branches and deploys
 
-This repo builds two client demos of KTrack from the same code. Each Vercel project deploys from its own branch, so the user decides when each site changes.
+This repo builds several client demos of KTrack from the same code. Each Vercel project deploys from its own branch, so the user decides when each site changes.
 
 | Branch | Site | Vercel project | Build setting |
 | --- | --- | --- | --- |
 | `main` | Kee Safety demo, kuroshio-ktrack.vercel.app | `ktrack-demo` | none (default) |
 | `fls` | DXB FLS certificate tracker | `ktrack-fls-demo`, not created yet; its Production Branch must be `fls` | `NEXT_PUBLIC_CLIENT=fls` |
+| `safeen` | SAFEEN Subsea ROV and survey equipment demo | `ktrack-safeen-demo`, not created yet; its Production Branch must be `safeen` | `NEXT_PUBLIC_CLIENT=safeen` |
 
 - A push to a branch deploys that branch's site. Pushing either branch, merging between them, or running `vercel --prod` is outward-facing: do it only when the user asks.
 - Kee work goes on `main`; FLS work goes on `fls`. On `fls`, FLS-only behaviour stays behind `IS_FLS` (`lib/client.ts`), so `main` can be merged into `fls` cleanly to bring Kee and shared fixes across.
-- Next allows only one `next dev` per folder (it locks `.next/dev`), so keep one checkout per branch, side by side: `keetrack` on `fls` and `keetrack-main` on `main` (a git worktree, `git worktree add ../keetrack-main main`). Run `bun dev` in `keetrack-main` for Kee (port 3000) and `bun run dev:fls` in `keetrack` for FLS (port 3001). The separate ports also keep each build's browser data apart.
+- Next allows only one `next dev` per folder (it locks `.next/dev`), so keep one checkout per branch, side by side: `keetrack` on `fls` and `keetrack-main` on `main` (a git worktree, `git worktree add ../keetrack-main main`). Run `bun dev` in `keetrack-main` for Kee (port 3000) and `bun run dev:fls` in `keetrack` for FLS (port 3001). `keetrack-safeen` holds `safeen` (`npm run dev:safeen`, port 3003); SAFEEN-only behaviour stays behind `IS_SAFEEN` (`lib/client.ts`), so `main` merges into it cleanly. The separate ports also keep each build's browser data apart.
 - The repo is public. Never commit client files or client data: `contextforclient/` holds the FLS client's own spreadsheet and voice notes and is git-ignored.

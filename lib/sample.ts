@@ -1,9 +1,12 @@
 import { addDays, quarterOf, quarterRange, type SavingInput } from "./domain";
+import { IS_SAFEEN } from "./client";
+import { subseaRows } from "./safeen-sample";
 import { REGISTER_HEADERS, type RegisterRow } from "./types";
 
 export type SampleId = "1" | "2";
 
 export function sampleRows(demoDate: string, sample: SampleId = "1"): RegisterRow[] {
+  if (IS_SAFEEN) return subseaRows(demoDate, sample);
   if (sample === "2") return [
     { assetRef: "RAS-201", recordType: "equipment", assetType: "Rope Access System", site: "Riverside Depot", owner: "Nora Iyer", serialNo: "RAS-201-RD", assignedEngineer: "Dev Shah", inspectionDueDate: demoDate, inspectionIntervalMonths: 12, certificateNo: "CERT-DEMO-0201", certificateIssuedDate: addDays(demoDate, -365), certificateExpiryDate: addDays(demoDate, -1), retirementDueDate: addDays(demoDate, 30), status: "Active" },
     { assetRef: "LIC-202", recordType: "licence", assetType: "Work-at-Height Licence", site: "Riverside Depot", owner: "Amal Joseph", assignedEngineer: "Leah Wong", licenceExpiryDate: addDays(demoDate, 7), status: "Active" },
@@ -24,6 +27,8 @@ export function sampleRows(demoDate: string, sample: SampleId = "1"): RegisterRo
 
 // Fictional savings on the sample sites, all in the demo date's quarter: a few days back, but never before the quarter starts.
 export function sampleSavings(demoDate: string, sample: SampleId = "1"): SavingInput[] {
+  // The SAFEEN build has no Sustainability page, so its samples carry no savings.
+  if (IS_SAFEEN) return [];
   const [quarterStart] = quarterRange(quarterOf(demoDate));
   const daysBack = (days: number) => { const date = addDays(demoDate, -days); return date < quarterStart ? quarterStart : date; };
   if (sample === "2") return [
