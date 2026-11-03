@@ -6,5 +6,5 @@ export const BRAND = IS_SAFEEN
   ? { name: "SAFEEN Subsea", tagline: "Subsea spread operations", mark: "S" }
   : { name: "Kee Safety", tagline: "Kee Safety operations", mark: "K" };
 
-// Pages one build leaves out: SAFEEN has no warranties or sustainability savings, and Kee has no spreads map or survey tallies.
-export const HIDDEN_VIEWS = IS_SAFEEN ? ["warranties", "sustainability"] : ["spreads", "surveys"];
+// Pages one build leaves out: SAFEEN has no warranties or sustainability savings, and Kee has no spreads map, survey tallies or anomaly register.
+export const HIDDEN_VIEWS = IS_SAFEEN ? ["warranties", "sustainability"] : ["spreads", "surveys", "anomalies"];

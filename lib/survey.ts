@@ -1,4 +1,5 @@
 import { activity, isDateString, makeId, nextDeadline, nowIso, OUT_OF_SERVICE } from "./domain";
+import { syncAnomalies } from "./anomaly";
 import { obligationFor } from "./safeen";
 import type { AppState, AssetRecord, Role } from "./types";
 
@@ -7,11 +8,14 @@ import type { AppState, AssetRecord, Role } from "./types";
 // suggests the result and the report rolls the rows up; the instruments used must be in calibration before it is issued.
 
 export type SurveyResult = "Accept" | "Monitor" | "Repair";
-export type SurveyPoint = { id: string; kp: number; cp?: number; wall?: number; anode?: number; code: string; note?: string };
+// length is the free span or exposed stretch in metres, read off the ROV video for an FS or EXP point.
+export type SurveyPoint = { id: string; kp: number; cp?: number; wall?: number; anode?: number; code: string; length?: number; note?: string };
 export type Survey = {
   id: string; number: string; title: string; line: string; site: string; date: string;
   rovId?: string; equipmentIds: string[];
   nominalWall: number; minWall: number;
+  // The client's allowable free span for this line, in metres.
+  spanLimit?: number;
   points: SurveyPoint[];
   status: "Draft" | "Issued"; issuedBy?: Role; issuedAt?: string;
   createdAt: string; updatedAt: string;
@@ -20,41 +24,53 @@ export type Survey = {
 // Sample criteria for the demo, marked as such on screen and in the report; the client's procedure replaces them.
 // CP against an Ag/AgCl seawater cell: -800 mV or more negative protects carbon steel; past -1100 mV risks hydrogen damage in
 // high-strength steel (DNV-RP-B401). Wall below the minimum allowable needs repair; below 87.5% of nominal (the line pipe
-// mill tolerance) it is watched. Anodes are watched past half consumed and retrofitted past three quarters.
-export const CRITERIA = { protectedMv: -800, overMv: -1100, millTolerance: 0.875, anodeWatch: 50, anodeRetrofit: 75 };
+// mill tolerance) it is watched. Anodes are watched past half consumed and replaced from three quarters. A free span longer
+// than the line's allowable span needs support; a shorter one is watched.
+export const CRITERIA = { protectedMv: -800, overMv: -1100, millTolerance: 0.875, anodeWatch: 50, anodeRetrofit: 75, spanLimit: 15 };
 
 export const POINT_CODES: Record<string, { label: string; result: SurveyResult }> = {
   OK: { label: "No anomaly", result: "Accept" },
   CD: { label: "Coating damage", result: "Monitor" },
   FS: { label: "Free span", result: "Monitor" },
-  EXP: { label: "Exposed (burial lost)", result: "Monitor" },
+  EXP: { label: "Exposure", result: "Monitor" },
   DEB: { label: "Debris on or near the line", result: "Monitor" },
   DNT: { label: "Dent or gouge", result: "Repair" },
 };
 
-// reasons are the report's sentences; tags are the same findings cut down for the tally grid.
-export type Graded = { result: SurveyResult | "Pending"; reasons: string[]; tags: string[] };
+// What a finding is about. The anomaly register tracks one anomaly per kind at a place on the line.
+export type FindingKind = "Low CP" | "Over-protection" | "Wall loss" | "Anode depletion" | "Free span" | "Exposure" | "Coating damage" | "Dent" | "Debris";
+export const KIND_OF_CODE: Record<string, FindingKind> = { CD: "Coating damage", FS: "Free span", EXP: "Exposure", DEB: "Debris", DNT: "Dent" };
+// reason is the report's sentence, tag the same finding cut down for the tally grid, measure the figure the register keeps.
+export type Finding = { kind: FindingKind; result: SurveyResult; reason: string; tag: string; measure: string };
+export type Graded = { result: SurveyResult | "Pending"; reasons: string[]; tags: string[]; findings: Finding[] };
 const RANK: SurveyResult[] = ["Accept", "Monitor", "Repair"];
-const worst = (results: SurveyResult[]) => results.reduce<SurveyResult>((top, item) => RANK.indexOf(item) > RANK.indexOf(top) ? item : top, "Accept");
+export const worse = (a: SurveyResult, b: SurveyResult) => RANK.indexOf(a) > RANK.indexOf(b);
+const worst = (results: SurveyResult[]) => results.reduce<SurveyResult>((top, item) => worse(item, top) ? item : top, "Accept");
 
-// The worst of the four checks wins. CP is read at every point, so a point without one is still pending.
-export function gradePoint(point: SurveyPoint, survey: Pick<Survey, "nominalWall" | "minWall">): Graded {
-  if (point.cp === undefined) return { result: "Pending", reasons: [], tags: [] };
-  const found: [SurveyResult, string, string][] = [];
-  if (point.cp > CRITERIA.protectedMv) found.push(["Repair", `Under-protected: ${point.cp} mV, limit ${CRITERIA.protectedMv} mV`, `CP ${point.cp} mV`]);
-  else if (point.cp < CRITERIA.overMv) found.push(["Monitor", `Over-protected: ${point.cp} mV, past ${CRITERIA.overMv} mV`, `Over-protected ${point.cp} mV`]);
+// The worst of the checks wins. CP is read at every point, so a point without one is still pending.
+export function gradePoint(point: SurveyPoint, survey: Pick<Survey, "nominalWall" | "minWall" | "spanLimit">): Graded {
+  if (point.cp === undefined) return { result: "Pending", reasons: [], tags: [], findings: [] };
+  const found: Finding[] = [];
+  const add = (kind: FindingKind, result: SurveyResult, reason: string, tag: string, measure: string) => found.push({ kind, result, reason, tag, measure });
+  if (point.cp > CRITERIA.protectedMv) add("Low CP", "Repair", `Under-protected: ${point.cp} mV, limit ${CRITERIA.protectedMv} mV`, `CP ${point.cp} mV`, `${point.cp} mV`);
+  else if (point.cp < CRITERIA.overMv) add("Over-protection", "Monitor", `Over-protected: ${point.cp} mV, past ${CRITERIA.overMv} mV`, `Over-protected ${point.cp} mV`, `${point.cp} mV`);
   if (point.wall !== undefined) {
     const percent = Math.round((point.wall / survey.nominalWall) * 100);
-    if (point.wall < survey.minWall) found.push(["Repair", `Wall ${point.wall} mm, below the ${survey.minWall} mm minimum allowable`, `Wall ${point.wall} mm, under minimum`]);
-    else if (point.wall < survey.nominalWall * CRITERIA.millTolerance) found.push(["Monitor", `Wall ${point.wall} mm, ${percent}% of nominal ${survey.nominalWall} mm`, `Wall ${percent}%`]);
+    if (point.wall < survey.minWall) add("Wall loss", "Repair", `Wall ${point.wall} mm, below the ${survey.minWall} mm minimum allowable`, `Wall ${point.wall} mm, under minimum`, `${point.wall} mm (${percent}%)`);
+    else if (point.wall < survey.nominalWall * CRITERIA.millTolerance) add("Wall loss", "Monitor", `Wall ${point.wall} mm, ${percent}% of nominal ${survey.nominalWall} mm`, `Wall ${percent}%`, `${point.wall} mm (${percent}%)`);
   }
   if (point.anode !== undefined) {
-    if (point.anode > CRITERIA.anodeRetrofit) found.push(["Repair", `Anode ${point.anode}% consumed; plan a retrofit`, `Anode ${point.anode}%`]);
-    else if (point.anode > CRITERIA.anodeWatch) found.push(["Monitor", `Anode ${point.anode}% consumed`, `Anode ${point.anode}%`]);
+    if (point.anode >= CRITERIA.anodeRetrofit) add("Anode depletion", "Repair", `Anode ${point.anode}% depleted; plan a replacement`, `Anode ${point.anode}%`, `${point.anode}% depleted`);
+    else if (point.anode > CRITERIA.anodeWatch) add("Anode depletion", "Monitor", `Anode ${point.anode}% depleted`, `Anode ${point.anode}%`, `${point.anode}% depleted`);
   }
   const code = POINT_CODES[point.code];
-  if (code && code.result !== "Accept") found.push([code.result, code.label, code.label]);
-  return { result: worst(found.map(([result]) => result)), reasons: found.map(([, reason]) => reason), tags: found.map(([, , tag]) => tag) };
+  const kind = KIND_OF_CODE[point.code];
+  if (code && kind) {
+    const limit = survey.spanLimit ?? CRITERIA.spanLimit;
+    if (point.code === "FS" && point.length !== undefined) add("Free span", point.length > limit ? "Repair" : "Monitor", `Free span ${point.length} m, allowable ${limit} m`, `Free span ${point.length} m`, `${point.length} m long`);
+    else add(kind, code.result, point.length !== undefined ? `${code.label}, ${point.length} m` : code.label, point.length !== undefined ? `${code.label} ${point.length} m` : code.label, point.length !== undefined ? `${point.length} m` : point.note ?? "Seen on video");
+  }
+  return { result: worst(found.map((item) => item.result)), reasons: found.map((item) => item.reason), tags: found.map((item) => item.tag), findings: found };
 }
 
 export function summarizeSurvey(survey: Survey) {
@@ -114,11 +130,13 @@ export function issueSurvey(state: AppState, id: string, actor = state.role, tim
   const survey = state.surveys?.find((item) => item.id === id);
   if (!survey || survey.status !== "Draft" || (actor !== "Admin" && actor !== "Reviewer") || issueBlockers(survey, state).length) return state;
   const { repair, monitor } = summarizeSurvey(survey);
-  return {
+  const issued: Survey = { ...survey, status: "Issued", issuedBy: actor, issuedAt: timestamp, updatedAt: timestamp };
+  // Issuing files every finding in the anomaly register, matched to what earlier campaigns found on the same line.
+  return syncAnomalies({
     ...state,
-    surveys: state.surveys!.map((item) => item.id === id ? { ...item, status: "Issued", issuedBy: actor, issuedAt: timestamp, updatedAt: timestamp } : item),
+    surveys: state.surveys!.map((item) => item.id === id ? issued : item),
     activity: [activity("Survey report issued", `${survey.number} · ${repair} for repair, ${monitor} to monitor`, actor, timestamp), ...state.activity],
-  };
+  }, issued, actor, timestamp);
 }
 
 const isNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
@@ -129,8 +147,8 @@ export function isSurvey(value: unknown): value is Survey {
   const survey = value as Partial<Survey>;
   return [survey.id, survey.number, survey.title, survey.line, survey.site, survey.createdAt, survey.updatedAt].every(isText) && isDateString(survey.date)
     && (survey.rovId === undefined || isText(survey.rovId)) && Array.isArray(survey.equipmentIds) && survey.equipmentIds.every(isText)
-    && isNumber(survey.nominalWall) && survey.nominalWall > 0 && isNumber(survey.minWall) && survey.minWall > 0
+    && isNumber(survey.nominalWall) && survey.nominalWall > 0 && isNumber(survey.minWall) && survey.minWall > 0 && (survey.spanLimit === undefined || isNumber(survey.spanLimit))
     && (survey.status === "Draft" || survey.status === "Issued") && (survey.issuedAt === undefined || isText(survey.issuedAt))
     && Array.isArray(survey.points) && survey.points.every((point) => Boolean(point) && isText(point.id) && isNumber(point.kp) && isText(point.code)
-      && [point.cp, point.wall, point.anode].every((reading) => reading === undefined || isNumber(reading)) && (point.note === undefined || isText(point.note)));
+      && [point.cp, point.wall, point.anode, point.length].every((reading) => reading === undefined || isNumber(reading)) && (point.note === undefined || isText(point.note)));
 }

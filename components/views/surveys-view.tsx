@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { FileCheck2, Plus, Printer, Trash2 } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { compareSurveys, previousCampaign, type Change, type ChangeRow } from "@/lib/anomaly";
 import { BRAND } from "@/lib/client";
 import { SPREAD_SITES } from "@/lib/safeen";
 import { CRITERIA, issueBlockers, issueSurvey, newPoint, POINT_CODES, saveSurvey, summarizeSurvey, unfitEquipment, type Graded, type Survey, type SurveyPoint } from "@/lib/survey";
@@ -22,14 +24,15 @@ const isRov = (record: AssetRecord) => record.status === "Active" && /\brov\b/i.
 // The instruments whose readings go on the sheet: CP probes and UT gauges.
 const isInstrument = (record: AssetRecord) => record.status === "Active" && /cp probe|thickness|\but\b/i.test(record.assetType);
 const kpText = (kp: number) => kp.toFixed(3);
-const criteriaText = `CP ${CRITERIA.protectedMv} to ${CRITERIA.overMv} mV Ag/AgCl · wall watched below ${CRITERIA.millTolerance * 100}% of nominal, repaired below the minimum allowable · anodes watched past ${CRITERIA.anodeWatch}% consumed, retrofitted past ${CRITERIA.anodeRetrofit}%`;
+const criteriaText = `CP ${CRITERIA.protectedMv} to ${CRITERIA.overMv} mV Ag/AgCl · wall watched below ${CRITERIA.millTolerance * 100}% of nominal, repaired below the minimum allowable · anodes watched past ${CRITERIA.anodeWatch}% depleted, replaced from ${CRITERIA.anodeRetrofit}% · free spans watched, supported past the line's allowable span (${CRITERIA.spanLimit} m by default)`;
 
 type FormState = { title: string; line: string; site: string; date: string; rovId: string; equipmentIds: string[]; nominalWall: string; minWall: string };
 
 export function SurveysView() {
   const { state, update } = useApp();
   const surveys = state.surveys ?? [];
-  const [selectedId, setSelectedId] = useState<string>();
+  const params = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | undefined>(() => params.get("survey") ?? undefined);
   const [form, setForm] = useState<FormState>();
   const [formError, setFormError] = useState("");
   const [printing, setPrinting] = useState<Survey>();
@@ -76,11 +79,11 @@ export function SurveysView() {
         {formError && <p className="text-sm text-danger sm:col-span-2" role="alert">{formError}</p>}
       </CardContent>
       <div className="flex justify-end gap-2 border-t border-line p-5"><Button variant="ghost" onClick={() => setForm(undefined)}>Cancel</Button><Button onClick={create}>Start survey</Button></div>
-    </Card> : selected ? <SurveySheet survey={selected} canEdit={canEdit} canIssue={canIssue} onPrint={() => setPrinting(selected)} /> : <Card><CardContent className="flex min-h-[420px] items-center justify-center p-8 text-center text-sm text-slate-500">Start a survey to tally CP, wall thickness and anode readings point by point.</CardContent></Card>}
+    </Card> : selected ? <SurveySheet key={selected.id} survey={selected} canEdit={canEdit} canIssue={canIssue} onPrint={() => setPrinting(selected)} /> : <Card><CardContent className="flex min-h-[420px] items-center justify-center p-8 text-center text-sm text-slate-500">Start a survey to tally CP, wall thickness and anode readings point by point.</CardContent></Card>}
 
     {printing && createPortal(<dialog ref={dialog} aria-label="Survey report print preview" onClose={() => setPrinting(undefined)} className="certificate-print-area animate-rise fixed inset-0 m-auto max-h-[95vh] w-[min(95vw,900px)] overflow-auto bg-white p-5 backdrop:bg-black/50 sm:p-10">
       <div className="print-hidden mb-5 flex justify-end gap-2"><Button onClick={() => window.print()}>Print / Save PDF</Button><Button variant="outline" onClick={() => dialog.current?.close()}>Close</Button></div>
-      <SurveyReport survey={printing} records={state.records} />
+      <SurveyReport survey={printing} records={state.records} surveys={surveys} />
     </dialog>, document.body)}
   </div>;
 }
@@ -90,6 +93,13 @@ function SurveySheet({ survey, canEdit, canIssue, onPrint }: { survey: Survey; c
   const [message, setMessage] = useState("");
   const editable = canEdit && survey.status === "Draft";
   const summary = summarizeSurvey(survey);
+  // The same line's other issued campaigns, oldest first, for the strip chart's year switch and the comparison.
+  const campaigns = (state.surveys ?? []).filter((item) => item.line === survey.line && (item.status === "Issued" || item.id === survey.id)).sort((a, b) => a.date.localeCompare(b.date));
+  const [shownId, setShownId] = useState(survey.id);
+  const shown = campaigns.find((item) => item.id === shownId) ?? survey;
+  const previous = previousCampaign(state.surveys ?? [], survey);
+  const changes = previous ? compareSurveys(previous, survey) : [];
+  const anomaliesAt = (point: SurveyPoint) => (state.anomalies ?? []).filter((item) => item.sightings.some((sighting) => sighting.surveyId === survey.id && Math.abs(sighting.kp - point.kp) < 0.001));
   const blockers = survey.status === "Draft" ? issueBlockers(survey, state) : [];
   const unfit = new Set(unfitEquipment(survey, state.records, state.demoDate).map(({ record }) => record.id));
   const rov = state.records.find((record) => record.id === survey.rovId);
@@ -124,7 +134,8 @@ function SurveySheet({ survey, canEdit, canIssue, onPrint }: { survey: Survey; c
     </dl>
   </CardHeader>
     <CardContent className="flex flex-col gap-5 p-5">
-      <Profile survey={survey} graded={summary.graded} onPick={jump} counts={summary} />
+      <StripChart survey={shown} campaigns={campaigns} onSwitch={setShownId} onPick={shown.id === survey.id ? jump : undefined} />
+      {previous && changes.length > 0 && <Comparison previous={previous} survey={survey} changes={changes} />}
       {survey.status === "Issued" ? <p className="rounded-lg bg-[#e7f4ed] px-4 py-3 text-sm text-[#187348]">Issued by the {survey.issuedBy?.toLowerCase()} on {survey.issuedAt ? formatDate(survey.issuedAt.slice(0, 10)) : "file"}. The readings are locked.</p>
         : blockers.length > 0 && <div role="status" className="rounded-lg bg-[#fff2d7] px-4 py-3 text-sm text-[#8a5d00]"><span className="font-semibold">Can&apos;t issue yet: </span>{blockers.join(" ")}</div>}
       {message && <p className="text-sm text-navy" role="status">{message}</p>}
@@ -136,7 +147,7 @@ function SurveySheet({ survey, canEdit, canIssue, onPrint }: { survey: Survey; c
           <td className="py-1.5 pr-2 text-right">{cell(point, "wall", "Wall")}</td>
           <td className="py-1.5 pr-2 text-right">{cell(point, "anode", "Anode")}</td>
           <td className="py-1.5 pl-2 pr-2">{editable ? <select aria-label={`Anomaly at KP ${kpText(point.kp)}`} className={`${flat} w-[150px] cursor-pointer ${point.code === "OK" ? "text-slate-400" : ""}`} value={point.code} onChange={(event) => setPoint(point.id, { code: event.target.value })}>{Object.entries(POINT_CODES).map(([code, { label }]) => <option key={code} value={code}>{code === "OK" ? "None" : label}</option>)}</select> : <span className={`inline-block px-2 py-1.5 ${point.code === "OK" ? "text-slate-400" : "text-navy"}`}>{point.code === "OK" ? "None" : POINT_CODES[point.code]?.label ?? point.code}</span>}{point.note && <div className="mt-0.5 max-w-[220px] px-2 pb-1 text-xs text-slate-500">{point.note}</div>}</td>
-          <td className="py-1.5 pr-5"><div className="flex items-start justify-between gap-2"><ResultCell graded={graded} />{editable && <button type="button" className="focus-ring mt-1 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-danger focus:opacity-100 group-hover:opacity-100" aria-label={`Remove KP ${kpText(point.kp)}`} onClick={() => savePoints(survey.points.filter((item) => item.id !== point.id))}><Trash2 className="size-4" /></button>}</div></td>
+          <td className="py-1.5 pr-5"><div className="flex items-start justify-between gap-2"><div><ResultCell graded={graded} />{anomaliesAt(point).map((item) => <Link key={item.id} href={`/anomalies?anomaly=${item.id}`} className="mt-1 block text-xs font-semibold text-accent underline-offset-2 hover:underline">{item.number} · {item.status}</Link>)}</div>{editable && <button type="button" className="focus-ring mt-1 rounded p-1 text-slate-400 opacity-0 transition-opacity hover:text-danger focus:opacity-100 group-hover:opacity-100" aria-label={`Remove KP ${kpText(point.kp)}`} onClick={() => savePoints(survey.points.filter((item) => item.id !== point.id))}><Trash2 className="size-4" /></button>}</div></td>
         </tr>)}</tbody>
       </table></div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -146,22 +157,76 @@ function SurveySheet({ survey, canEdit, canIssue, onPrint }: { survey: Survey; c
     </CardContent></Card>;
 }
 
-// The line drawn to scale along its KPs, each point a dot in its result's colour, so trouble shows where it is before any row is read.
+// The line drawn to scale along its KPs in three bands: each point's result, the CP profile against its limits, and the
+// seabed (buried, exposed or spanning). With more than one campaign on the line, the year switch redraws it for that year.
 const DOT = { Accept: "bg-[#2f9e6a]", Monitor: "bg-[#d99512]", Repair: "bg-[#c2373d]", Pending: "border-2 border-slate-300 bg-white" } as const;
-function Profile({ survey, graded, counts, onPick }: { survey: Survey; graded: { point: SurveyPoint; graded: Graded }[]; counts: { accept: number; monitor: number; repair: number; pending: number }; onPick: (id: string) => void }) {
+const CP_TOP = -750;
+const CP_BOTTOM = -1150;
+function StripChart({ survey, campaigns, onSwitch, onPick }: { survey: Survey; campaigns: Survey[]; onSwitch: (id: string) => void; onPick?: (id: string) => void }) {
+  const summary = summarizeSurvey(survey);
+  const graded = summary.graded;
   if (!graded.length) return null;
   const from = graded[0].point.kp;
   const span = graded.at(-1)!.point.kp - from || 1;
-  return <div className="rounded-lg border border-line bg-paper px-5 pb-3 pt-4">
-    <div className="relative mx-2 h-6">
-      <div className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[#c9d8e3]" />
-      {graded.map(({ point, graded: g }) => <button key={point.id} type="button" onClick={() => onPick(point.id)} title={`KP ${kpText(point.kp)} · ${g.result}${g.tags.length ? `: ${g.tags.join(", ")}` : ""}`} aria-label={`KP ${kpText(point.kp)}, ${g.result}`} style={{ left: `${((point.kp - from) / span) * 100}%` }} className={`focus-ring absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-transform hover:scale-125 ${g.result === "Accept" ? "size-2.5" : "size-3.5 ring-2 ring-white"} ${DOT[g.result]}`} />)}
+  const x = (kp: number) => Math.min(100, Math.max(0, ((kp - from) / span) * 100));
+  const y = (cp: number) => Math.min(40, Math.max(0, ((CP_TOP - cp) / (CP_TOP - CP_BOTTOM)) * 40));
+  const cps = graded.filter(({ point }) => point.cp !== undefined);
+  const seabed = graded.filter(({ point }) => point.code === "FS" || point.code === "EXP");
+  const label = "text-[11px] font-semibold uppercase tracking-[.08em] text-slate-500";
+  return <div className="rounded-lg border border-line bg-paper px-4 pb-3 pt-3">
+    {campaigns.length > 1 && <div className="mb-3 flex items-center justify-between gap-3"><span className={label}>Campaign</span><div role="group" aria-label="Campaign year" className="flex rounded-lg border border-line bg-white p-0.5">{campaigns.map((item) => <button key={item.id} type="button" aria-pressed={item.id === survey.id} onClick={() => onSwitch(item.id)} title={item.number} className={`focus-ring rounded-md px-3 py-1 text-xs font-semibold tabular-nums transition-colors ${item.id === survey.id ? "bg-navy text-white" : "text-slate-600 hover:bg-paper"}`}>{item.date.slice(0, 4)}</button>)}</div></div>}
+    <div className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
+      <span className={label}>Points</span>
+      <div className="relative mx-2 h-6">
+        <div className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-[#c9d8e3]" />
+        {graded.map(({ point, graded: g }) => <button key={point.id} type="button" disabled={!onPick} onClick={() => onPick?.(point.id)} title={`KP ${kpText(point.kp)} · ${g.result}${g.tags.length ? `: ${g.tags.join(", ")}` : ""}`} aria-label={`KP ${kpText(point.kp)}, ${g.result}`} style={{ left: `${x(point.kp)}%` }} className={`focus-ring absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-transform enabled:hover:scale-125 ${g.result === "Accept" ? "size-2.5" : "size-3.5 ring-2 ring-white"} ${DOT[g.result]}`} />)}
+      </div>
+      <span className={label}>CP</span>
+      <div className="relative ml-2 pr-11">
+        {/* Above the red line the steel is under-protected; below the amber one, over-protected. */}
+        <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="block h-14 w-full overflow-visible" role="img" aria-label={`CP from ${summary.cpRange?.[1]} to ${summary.cpRange?.[0]} mV along the line`}>
+          <rect x="0" y="0" width="100" height={y(CRITERIA.protectedMv)} className="fill-[#c2373d]/10" />
+          <rect x="0" y={y(CRITERIA.overMv)} width="100" height={40 - y(CRITERIA.overMv)} className="fill-[#d99512]/10" />
+          <line x1="0" x2="100" y1={y(CRITERIA.protectedMv)} y2={y(CRITERIA.protectedMv)} className="stroke-[#c2373d]" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+          <line x1="0" x2="100" y1={y(CRITERIA.overMv)} y2={y(CRITERIA.overMv)} className="stroke-[#d99512]" strokeWidth="1" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+          {cps.length > 1 && <polyline fill="none" className="stroke-accent" strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" points={cps.map(({ point }) => `${x(point.kp)},${y(point.cp!)}`).join(" ")} />}
+        </svg>
+        <span style={{ top: `${(y(CRITERIA.protectedMv) / 40) * 100}%` }} className="pointer-events-none absolute right-0 -translate-y-1/2 text-[10px] font-semibold tabular-nums text-[#a12a30]">{CRITERIA.protectedMv}</span>
+        <span style={{ top: `${(y(CRITERIA.overMv) / 40) * 100}%` }} className="pointer-events-none absolute right-0 -translate-y-1/2 text-[10px] font-semibold tabular-nums text-[#8a5d00]">{CRITERIA.overMv}</span>
+      </div>
+      <span className={label}>Seabed</span>
+      <div className="relative mx-2 h-2.5 rounded-full bg-[#cfd9c4]" title="Buried">
+        {seabed.map(({ point, graded: g }) => { const width = Math.max(1.5, (((point.length ?? 10) / 1000) / span) * 100); return <span key={point.id} title={`KP ${kpText(point.kp)} · ${point.code === "FS" ? "Free span" : "Exposed"}${point.length !== undefined ? ` ${point.length} m` : ""}`} style={{ left: `${Math.max(0, x(point.kp) - width / 2)}%`, width: `${width}%` }} className={`absolute inset-y-0 rounded-full ${point.code === "FS" ? g.result === "Repair" ? "bg-[#c2373d]" : "bg-[#d99512]" : "bg-[#8aa1b3]"}`} />; })}
+      </div>
     </div>
-    <div className="mt-2 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 text-xs">
-      <span className="font-mono text-slate-500">KP {kpText(from)} → {kpText(from + span)} · {survey.points.length} points</span>
-      <span className="flex flex-wrap gap-x-4 font-semibold tabular-nums"><span className="text-[#187348]">{counts.accept} accept</span><span className="text-[#8a5d00]">{counts.monitor} monitor</span><span className="text-danger">{counts.repair} repair</span>{counts.pending > 0 && <span className="text-slate-500">{counts.pending} pending</span>}</span>
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 text-xs">
+      <span className="font-mono text-slate-500">KP {kpText(from)} → {kpText(from + span)} · {survey.points.length} points · {survey.date.slice(0, 4)}</span>
+      <span className="flex flex-wrap gap-x-4 font-semibold tabular-nums"><span className="text-[#187348]">{summary.accept} accept</span><span className="text-[#8a5d00]">{summary.monitor} monitor</span><span className="text-danger">{summary.repair} repair</span>{summary.pending > 0 && <span className="text-slate-500">{summary.pending} pending</span>}</span>
     </div>
+    <div className="mt-1.5 flex flex-wrap gap-x-4 text-[11px] text-slate-500"><span><span className="mr-1 inline-block h-0.5 w-3 bg-accent align-middle" />CP reading</span><span><span className="mr-1 inline-block h-2 w-3 rounded-sm bg-[#cfd9c4] align-middle" />Buried</span><span><span className="mr-1 inline-block h-2 w-3 rounded-sm bg-[#8aa1b3] align-middle" />Exposed</span><span><span className="mr-1 inline-block h-2 w-3 rounded-sm bg-[#d99512] align-middle" />Free span</span></div>
   </div>;
+}
+
+const CHANGE_TONE: Record<Change, "danger" | "warning" | "outline" | "success"> = { New: "warning", Worsened: "danger", Unchanged: "outline", Resolved: "success" };
+// Year on year for the same line: what is new, worse, unchanged or fixed since the last campaign.
+function Comparison({ previous, survey, changes, print }: { previous: Survey; survey: Survey; changes: ChangeRow[]; print?: boolean }) {
+  const count = (change: Change) => changes.filter((row) => row.change === change).length;
+  return <section className={print ? "mt-8" : "rounded-lg border border-line"}>
+    <div className={`flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 ${print ? "" : "border-b border-line px-4 py-3"}`}>
+      <div><div className="eyebrow">{print ? "Appendix · " : ""}Year on year</div><div className="mt-0.5 text-sm font-semibold text-navy">Since {previous.number}, {formatDate(previous.date)}</div></div>
+      <div className="flex flex-wrap gap-x-4 text-xs font-semibold tabular-nums">{(["New", "Worsened", "Unchanged", "Resolved"] as Change[]).map((change) => <span key={change} className={change === "Worsened" ? "text-danger" : change === "New" ? "text-[#8a5d00]" : change === "Resolved" ? "text-[#187348]" : "text-slate-500"}>{count(change)} {change.toLowerCase()}</span>)}</div>
+    </div>
+    <div className="relative overflow-x-auto"><table className={`w-full min-w-[560px] text-left ${print ? "mt-3 text-xs" : "text-sm"}`}>
+      <thead><tr className="border-b border-line text-xs text-slate-500"><th className={`py-2 pr-3 font-semibold ${print ? "" : "pl-4"}`}>KP</th><th className="py-2 pr-3 font-semibold">Item</th><th className="py-2 pr-3 text-right font-semibold">{previous.date.slice(0, 4)}</th><th className="py-2 pr-3 text-right font-semibold">{survey.date.slice(0, 4)}</th><th className={`py-2 font-semibold ${print ? "text-right" : "pr-4"}`}>Change</th></tr></thead>
+      <tbody>{changes.map((row, index) => <tr key={`${row.kp}-${row.item}-${index}`} className="border-b border-line/70 last:border-0">
+        <td className={`py-1.5 pr-3 font-mono text-xs font-semibold text-navy ${print ? "" : "pl-4"}`}>{kpText(row.kp)}</td>
+        <td className="py-1.5 pr-3 text-navy">{row.item}</td>
+        <td className="py-1.5 pr-3 text-right tabular-nums text-slate-500">{row.before}</td>
+        <td className="py-1.5 pr-3 text-right font-semibold tabular-nums text-navy">{row.after}</td>
+        <td className={`py-1.5 ${print ? "text-right font-semibold" : "pr-4"}`}>{print ? `${row.change}${row.result !== "Accept" && (row.change === "New" || row.change === "Worsened") ? `, ${row.result}` : ""}` : <span className="flex items-center gap-2"><Badge variant={CHANGE_TONE[row.change]}>{row.change}</Badge>{row.result !== "Accept" && (row.change === "New" || row.change === "Worsened") && <span className={`text-xs font-semibold ${row.result === "Repair" ? "text-danger" : "text-[#8a5d00]"}`}>now {row.result}</span>}</span>}</td>
+      </tr>)}</tbody>
+    </table></div>
+  </section>;
 }
 
 // Only what needs action is loud; an accepted point is a quiet word.
@@ -172,8 +237,9 @@ function ResultCell({ graded }: { graded: Graded }) {
 }
 
 // The client-pack report: the tally as surveyed, then the points that need action, then who issued it.
-function SurveyReport({ survey, records }: { survey: Survey; records: AssetRecord[] }) {
+function SurveyReport({ survey, records, surveys }: { survey: Survey; records: AssetRecord[]; surveys: Survey[] }) {
   const summary = summarizeSurvey(survey);
+  const previous = previousCampaign(surveys, survey);
   const ref = (id?: string) => records.find((record) => record.id === id);
   return <div className="mx-auto border-[8px] border-[#0b3151] p-1"><div className="border border-[#b8cedc] p-5 sm:p-8">
     <div className="flex items-start justify-between gap-4"><div><div className="text-xs font-bold uppercase tracking-[.2em] text-accent">{BRAND.name} · KTrack</div><h2 className="mt-4 text-2xl font-black tracking-tight text-navy">Pipeline survey report</h2><p className="mt-1 text-sm text-slate-500">{survey.title}</p></div><Badge variant={survey.status === "Issued" ? "warning" : "danger"}>{survey.status === "Issued" ? "DEMO" : "DRAFT · NOT ISSUED"}</Badge></div>
@@ -185,6 +251,7 @@ function SurveyReport({ survey, records }: { survey: Survey; records: AssetRecor
     <table className="mt-6 w-full text-left text-xs"><thead><tr className="border-b border-line text-slate-500"><th className="py-1.5 pr-2 font-semibold">KP</th><th className="py-1.5 pr-2 text-right font-semibold">CP (mV)</th><th className="py-1.5 pr-2 text-right font-semibold">Wall (mm)</th><th className="py-1.5 pr-2 text-right font-semibold">Anode (%)</th><th className="py-1.5 pr-2 font-semibold">Anomaly</th><th className="py-1.5 text-right font-semibold">Result</th></tr></thead>
       <tbody>{summary.graded.map(({ point, graded }) => <tr key={point.id} className="border-b border-line/70"><td className="py-1 pr-2 font-mono text-navy">{kpText(point.kp)}</td><td className="py-1 pr-2 text-right tabular-nums">{point.cp ?? "–"}</td><td className="py-1 pr-2 text-right tabular-nums">{point.wall ?? "–"}</td><td className="py-1 pr-2 text-right tabular-nums">{point.anode ?? "–"}</td><td className="py-1 pr-2">{point.code}</td><td className={`py-1 text-right font-semibold ${graded.result === "Repair" ? "text-danger" : graded.result === "Monitor" ? "text-[#8a5d00]" : "text-navy"}`}>{graded.result}</td></tr>)}</tbody></table>
     {summary.anomalies.length > 0 && <div className="mt-6"><div className="eyebrow">Points needing action</div><ul className="mt-2 flex flex-col gap-2 text-sm">{summary.anomalies.map(({ point, graded }) => <li key={point.id} className="text-navy"><span className="font-mono font-semibold">KP {kpText(point.kp)}</span> · <span className="font-semibold">{graded.result}</span>: {graded.reasons.join("; ")}{point.note ? `. ${point.note}` : ""}</li>)}</ul></div>}
+    {previous && <Comparison previous={previous} survey={survey} changes={compareSurveys(previous, survey)} print />}
     <p className="mt-6 text-xs text-slate-500">Sample criteria: {criteriaText}.</p>
     <div className="mt-8 grid gap-8 border-t border-line pt-6 sm:grid-cols-2"><div><div className="eyebrow">Surveyed by</div><div className="mt-6 border-b border-slate-400" /><div className="mt-1 text-xs text-slate-500">Party chief · {formatDate(survey.date)}</div></div><div><div className="eyebrow">Issued by</div><div className="mt-6 border-b border-slate-400" /><div className="mt-1 text-xs text-slate-500">{survey.status === "Issued" && survey.issuedAt ? `Authorised ${survey.issuedBy?.toLowerCase()} · ${formatDate(survey.issuedAt.slice(0, 10))}` : "Not issued"}</div></div></div>
   </div></div>;

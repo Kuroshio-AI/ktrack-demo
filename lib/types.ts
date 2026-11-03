@@ -1,3 +1,4 @@
+import type { Anomaly } from "./anomaly";
 import type { Survey } from "./survey";
 export const REGISTER_HEADERS = [
   "asset_ref",
@@ -188,6 +189,8 @@ export type AppState = {
   savingCounters?: Record<string, number>;
   // SAFEEN pipeline and riser survey tallies; optional so older workspaces stay valid.
   surveys?: Survey[];
+  // Findings from issued surveys, tracked until closed out.
+  anomalies?: Anomaly[];
 };
 
 export type ImportError = {

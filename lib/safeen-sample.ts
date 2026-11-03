@@ -1,4 +1,5 @@
 import { addDays, addMonthsClamped, approveInspection, createInitialState, createInspection, importRows, recalculateAlerts, redTagInspection, returnInspection, submitInspection, updateInspection } from "./domain";
+import { advanceAnomaly } from "./anomaly";
 import { issueSurvey, newPoint, saveSurvey } from "./survey";
 import { subseaChecklist } from "./safeen";
 import type { AppState, ChecklistItem, RegisterRow } from "./types";
@@ -115,15 +116,38 @@ export function subseaDemo(demoDate: string): AppState {
   const draft = createInspection(state, id("ROV-01"), "Engineer", stamp(0, "06:30"));
   state = updateInspection(draft.state, draft.inspection.id, { checklist: draft.inspection.checklist.map((item, index) => index < 3 ? { ...item, result: "pass" as const } : item) }, stamp(0, "06:50"));
 
-  // Two survey tallies. The export line was surveyed and issued three weeks ago, while the UT gauge was still in date; the
-  // riser survey is on the ROV now, and can't be issued until that gauge is recalibrated.
-  const point = (kp: number, cp?: number, wall?: number, anode?: number, code = "OK", note?: string) => ({ ...newPoint(kp), cp, wall, anode, code, ...(note ? { note } : {}) });
-  const exportLine = { title: "Export line CP and UT survey, KP 12.0 to 13.2", line: "16\" Das Island export line", site: "SAFEEN Surveyor", date: addDays(demoDate, -21), rovId: id("ROV-02"), equipmentIds: [id("CP-01"), id("UTG-01")], nominalWall: 15.9, minWall: 12.7,
-    points: [point(12.0, -1032, 15.7, 30), point(12.15, -1028, 15.8, 32), point(12.3, -1019, 15.6, 35), point(12.45, -1010, 15.7, 41, "CD", "Coating scrape at 3 o'clock, 0.3 m long"), point(12.6, -1004, 15.5, 62), point(12.75, -1015, 15.8, 38), point(12.9, -1021, 15.7, 33), point(13.05, -1026, 15.9, 29), point(13.2, -1030, 15.8, 31)] };
-  state = saveSurvey({ ...state, demoDate: exportLine.date }, exportLine, "Engineer", stamp(-21, "16:10"));
-  state = { ...issueSurvey(state, state.surveys![0].id, "Reviewer", stamp(-20, "10:30")), demoDate };
-  const riser = { title: "Riser R-3 CP and UT survey", line: "Upper Zakum riser R-3", site: "SAFEEN Surveyor", date: demoDate, rovId: id("ROV-01"), equipmentIds: [id("CP-01"), id("UTG-01")], nominalWall: 19.1, minWall: 15.2,
-    points: [point(0, -1020, 18.9, 25), point(0.15, -1005, 18.7, 30), point(0.3, -780, 16.1, 90, "CD", "Anode nearly gone; coating holiday beside it"), point(0.45, -995, 18.8, 35), point(0.6, -1012, 18.6, 40, "FS", "Free span about 14 m at the riser base"), point(0.75, -1118, 18.9, 20), point(0.9)] };
+  // Survey tallies. Pipeline A was surveyed in 2024 and again three weeks ago, while the UT gauge was still in date: the two
+  // campaigns feed the anomaly register and the year-on-year comparison. The riser survey is on the ROV now and can't be
+  // issued until that gauge is recalibrated.
+  const point = (kp: number, cp?: number, wall?: number, anode?: number, code = "OK", note?: string, length?: number) => ({ ...newPoint(kp), cp, wall, anode, code, ...(note ? { note } : {}), ...(length !== undefined ? { length } : {}) });
+  const pipelineA = { line: "Pipeline A · 16\" Das Island export line", site: "SAFEEN Surveyor", rovId: id("ROV-02"), equipmentIds: [id("CP-01"), id("UTG-01")], nominalWall: 15.9, minWall: 12.7, spanLimit: 15 };
+  const y2024 = addDays(demoDate, -735);
+  const y2026 = addDays(demoDate, -21);
+  const at = (date: string, time: string) => `${date}T${time}:00.000Z`;
+  state = saveSurvey({ ...state, demoDate: y2024 }, { ...pipelineA, title: "Pipeline A CP and UT survey, KP 11.0 to 14.0", date: y2024, points: [
+    point(11.0, -1030, 15.8, 30), point(11.2, -1025, 15.7, 32), point(11.4, -1022, 15.8, 28), point(11.6, -1018, 15.7, 35, "DEB", "Wire rope lying across the line"),
+    point(11.8, -1015, 15.6, 33), point(12.0, -1012, 15.7, 36), point(12.2, -1008, 15.6, 38), point(12.4, -1005, 15.5, 40, "FS", "Gap 0.3 m under the pipe", 11),
+    point(12.6, -1000, 15.6, 37), point(12.8, -995, 15.6, 41, "CD", "Coating scrape at 3 o'clock, 0.3 m long"), point(13.0, -990, 15.7, 38), point(13.1, -985, 15.6, 40),
+    point(13.2, -980, 15.7, 36), point(13.4, -970, 15.6, 39), point(13.6, -962, 15.5, 42, "CD", "Field joint coating cracked"), point(13.8, -955, 15.6, 40), point(14.0, -950, 15.6, 44)] }, "Engineer", at(y2024, "16:10"));
+  state = issueSurvey(state, state.surveys![0].id, "Reviewer", at(addDays(y2024, 1), "10:30"));
+  // Between campaigns: the debris and the coating scrape were dealt with, and the cracked field joint was scheduled.
+  const anomaly = (kind: string, kp: number) => state.anomalies!.find((item) => item.kind === kind && Math.abs(item.kp - kp) < 0.01)!.id;
+  const step = (id: string, days: number, note: string, change?: { action?: string; target?: string }) => { const date = addDays(y2024, days); state = { ...advanceAnomaly({ ...state, demoDate: date }, id, note, change, "Reviewer", at(date, "09:00")), demoDate }; };
+  step(anomaly("Debris", 11.6), 40, "Recover the wire rope with the ROV on the next transit", { action: "Debris removal" });
+  step(anomaly("Debris", 11.6), 95, "Removed by ROV-02, work order WO-25-0114");
+  step(anomaly("Coating damage", 12.8), 60, "Clamp-on coating repair", { action: "Coating repair" });
+  step(anomaly("Coating damage", 12.8), 230, "Repaired by the dive team, work order WO-25-0233");
+  step(anomaly("Coating damage", 13.6), 300, "Field joint recoat at the next shutdown", { action: "Field joint recoat", target: addDays(demoDate, 42) });
+  state = saveSurvey({ ...state, demoDate: y2026 }, { ...pipelineA, title: "Pipeline A CP and UT survey, KP 11.0 to 14.0", date: y2026, points: [
+    point(11.0, -1020, 15.7, 38), point(11.2, -1010, 15.6, 41, "EXP", "Cover washed out over the pipe", 6), point(11.4, -1008, 15.7, 36), point(11.6, -1004, 15.6, 42),
+    point(11.8, -1000, 15.5, 40), point(12.0, -996, 15.6, 44), point(12.2, -990, 15.5, 45), point(12.4, -985, 15.4, 47, "FS", "Gap 0.6 m under the pipe", 18),
+    point(12.6, -980, 15.5, 44), point(12.8, -972, 15.5, 46), point(13.0, -960, 15.6, 46), point(13.1, -950, 15.5, 75),
+    point(13.2, -940, 15.5, 44), point(13.4, -915, 15.4, 48), point(13.6, -880, 15.4, 50, "CD", "Field joint coating cracked; no change"), point(13.8, -850, 15.5, 49), point(14.0, -820, 15.4, 48)] }, "Engineer", at(y2026, "16:10"));
+  state = { ...issueSurvey(state, state.surveys![0].id, "Reviewer", at(addDays(y2026, 1), "10:30")), demoDate };
+  // The debris passed its re-inspection and has been closed out; the coating repair is waiting for the reviewer.
+  step(anomaly("Debris", 11.6), 735 - 18, "Close-out signed: re-inspection found the line clear");
+  const riser = { title: "Riser R-3 CP and UT survey", line: "Upper Zakum riser R-3", site: "SAFEEN Surveyor", date: demoDate, rovId: id("ROV-01"), equipmentIds: [id("CP-01"), id("UTG-01")], nominalWall: 19.1, minWall: 15.2, spanLimit: 15,
+    points: [point(0, -1020, 18.9, 25), point(0.15, -1005, 18.7, 30), point(0.3, -780, 16.1, 90, "CD", "Anode nearly gone; coating holiday beside it"), point(0.45, -995, 18.8, 35), point(0.6, -1012, 18.6, 40, "FS", "Free span at the riser base", 14), point(0.75, -1118, 18.9, 20), point(0.9)] };
   state = saveSurvey(state, riser, "Engineer", stamp(0, "08:05"));
 
   return recalculateAlerts({ ...state, role: "Admin" }, stamp(0, "09:45"));

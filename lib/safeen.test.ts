@@ -67,7 +67,7 @@ test("a survey tally grades each point and holds the report while a gauge is out
   const { subseaDemo } = await import("./safeen-sample");
   const { gradePoint, issueBlockers, issueSurvey, summarizeSurvey } = await import("./survey");
   const line = { nominalWall: 19.1, minWall: 15.2 };
-  assert.deepEqual(gradePoint({ id: "a", kp: 0, cp: -1000, wall: 18.9, anode: 20, code: "OK" }, line), { result: "Accept", reasons: [], tags: [] });
+  assert.deepEqual(gradePoint({ id: "a", kp: 0, cp: -1000, wall: 18.9, anode: 20, code: "OK" }, line), { result: "Accept", reasons: [], tags: [], findings: [] });
   assert.equal(gradePoint({ id: "b", kp: 0, cp: -800, code: "OK" }, line).result, "Accept");
   assert.equal(gradePoint({ id: "c", kp: 0, cp: -799, code: "OK" }, line).result, "Repair");
   assert.deepEqual(gradePoint({ id: "d", kp: 0, cp: -1000, wall: 16.1, code: "OK" }, line).tags, ["Wall 84%"]);
@@ -75,11 +75,43 @@ test("a survey tally grades each point and holds the report while a gauge is out
   assert.equal(gradePoint({ id: "f", kp: 0, wall: 18, code: "OK" }, line).result, "Pending");
 
   const state = subseaDemo("2026-11-03");
-  const [riser, exportLine] = state.surveys!;
-  assert.deepEqual([exportLine.status, riser.status], ["Issued", "Draft"]);
-  assert.deepEqual([exportLine.number, riser.number], ["SVR-26-001", "SVR-26-002"]);
+  const [riser, exportLine, lastYear] = state.surveys!;
+  assert.deepEqual([lastYear.status, exportLine.status, riser.status], ["Issued", "Issued", "Draft"]);
+  assert.deepEqual([lastYear.number, exportLine.number, riser.number], ["SVR-24-001", "SVR-26-001", "SVR-26-002"]);
   const summary = summarizeSurvey(riser);
   assert.deepEqual([summary.accept, summary.monitor, summary.repair, summary.pending], [3, 2, 1, 1]);
   assert.deepEqual(issueBlockers(riser, state), ["1 point has no CP reading yet.", "UTG-01 calibration is 10 days overdue."]);
   assert.equal(issueSurvey(state, riser.id, "Reviewer"), state);
+});
+
+test("issued campaigns file anomalies, match them year on year and close them out", async () => {
+  const { subseaDemo } = await import("./safeen-sample");
+  const { advanceAnomaly, compareSurveys, previousCampaign } = await import("./anomaly");
+  const { gradePoint } = await import("./survey");
+  const line = { nominalWall: 19.1, minWall: 15.2 };
+  assert.equal(gradePoint({ id: "s", kp: 0, cp: -1000, code: "FS", length: 15 }, line).result, "Monitor");
+  assert.equal(gradePoint({ id: "s", kp: 0, cp: -1000, code: "FS", length: 16 }, line).result, "Repair");
+  assert.equal(gradePoint({ id: "a", kp: 0, cp: -1000, anode: 75, code: "OK" }, line).result, "Repair");
+
+  const state = subseaDemo("2026-11-03");
+  const byNumber = Object.fromEntries(state.anomalies!.map((item) => [item.number, item]));
+  const span = byNumber["ANM-0231"];
+  assert.deepEqual([span.kind, span.result, span.status, span.sightings.map((item) => item.measure)], ["Free span", "Repair", "Open", ["11 m long", "18 m long"]]);
+  assert.deepEqual([byNumber["ANM-0230"].status, byNumber["ANM-0232"].status, byNumber["ANM-0233"].status], ["Closed", "Re-inspected", "Action planned"]);
+
+  const [, now, before] = state.surveys!;
+  assert.equal(previousCampaign(state.surveys!, now), before);
+  const rows = compareSurveys(before, now);
+  const count = (change: string) => rows.filter((row) => row.change === change).length;
+  assert.deepEqual([count("New"), count("Worsened"), count("Unchanged"), count("Resolved")], [1, 6, 1, 2]);
+  assert.deepEqual(rows.find((row) => row.item === "Free span"), { kp: 12.4, item: "Free span", before: "11 m", after: "18 m", change: "Worsened", result: "Repair" });
+
+  // Only a reviewer closes out, and planning needs a note.
+  const reinspected = byNumber["ANM-0232"].id;
+  assert.equal(advanceAnomaly(state, reinspected, "Closed out", {}, "Engineer"), state);
+  assert.equal(advanceAnomaly(state, span.id, " ", {}, "Reviewer"), state);
+  const closed = advanceAnomaly(state, reinspected, "Re-inspection clear", {}, "Reviewer");
+  assert.equal(closed.anomalies!.find((item) => item.id === reinspected)?.status, "Closed");
+  const planned = advanceAnomaly(state, span.id, "Book DSV", { action: "Grout bags", target: "2026-12-15" }, "Reviewer");
+  assert.deepEqual((({ status, action, target }) => ({ status, action, target }))(planned.anomalies!.find((item) => item.id === span.id)!), { status: "Action planned", action: "Grout bags", target: "2026-12-15" });
 });

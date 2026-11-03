@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, BarChart3, Map as MapIcon, BellRing, BookOpenCheck, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Import, Leaf, Menu, Waves, Settings2, ShieldCheck, X } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, Map as MapIcon, BellRing, BookOpenCheck, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Import, Leaf, Menu, TriangleAlert, Waves, Settings2, ShieldCheck, X } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import { AlertsView } from "@/components/views/alerts-view";
 import { DemoControlsView } from "@/components/views/demo-controls-view";
 import { FleetMapView } from "@/components/views/fleet-map-view";
 import { SurveysView } from "@/components/views/surveys-view";
+import { AnomaliesView } from "@/components/views/anomalies-view";
 import { SafeenMark } from "@/components/safeen-mark";
 import { BRAND, HIDDEN_VIEWS, IS_SAFEEN } from "@/lib/client";
 import type { Role } from "@/lib/types";
@@ -31,6 +32,7 @@ const nav = [
   { id: "register", label: "Register", icon: ClipboardList },
   { id: "spreads", label: "Spreads", icon: MapIcon },
   { id: "surveys", label: "Surveys", icon: Waves },
+  { id: "anomalies", label: "Anomalies", icon: TriangleAlert },
   { id: "inspections", label: "Inspections", icon: CalendarCheck },
   { id: "approvals", label: "Approvals", icon: BookOpenCheck },
   { id: "certificates", label: "Certificates", icon: ShieldCheck },
@@ -58,6 +60,7 @@ const titles: Record<string, { eyebrow: string; title: string; description: stri
   import: { eyebrow: "Data intake", title: "Import", description: IS_SAFEEN ? "Validate an equipment register spreadsheet and review the rows before importing." : "Validate a register or sustainability savings spreadsheet and review the rows before importing." },
   dashboard: { eyebrow: "Operations overview", title: "Dashboard", description: "Deadlines, review work and recent movement for this demo date." },
   register: IS_SAFEEN ? { eyebrow: "Equipment register", title: "Equipment", description: "ROVs, tooling, lifting gear, survey sensors and crew competences, with the certificate or calibration each one needs." } : { eyebrow: "Asset register", title: "Asset register", description: "Search equipment, licences and their linked obligations." },
+  anomalies: { eyebrow: "Asset integrity", title: "Anomalies", description: "Every finding on the client's lines, tracked from the survey that found it until it is repaired, re-inspected and closed." },
   surveys: { eyebrow: "ROV inspection", title: "Surveys", description: "Tally CP, wall thickness and anode readings point by point along a line or riser, then issue the survey report." },
   spreads: { eyebrow: "Positioning", title: "Spreads", description: "Where each vessel and the base are working, and what on board is out of date." },
   inspections: IS_SAFEEN ? { eyebrow: "Field work", title: "Inspections", description: "Run the pre-dive, calibration or lifting checklist for the equipment type, on deck or on a phone, then send it for review." } : { eyebrow: "Field work", title: "Inspections", description: "Draft a mobile-friendly checklist, then send it for review." },
@@ -74,6 +77,7 @@ function View({ view }: { view: string }): ReactNode {
   switch (view) {
     case "spreads": return <FleetMapView />;
     case "surveys": return <SurveysView />;
+    case "anomalies": return <AnomaliesView />;
     case "dashboard": return <DashboardView />;
     case "register": return <RegisterView />;
     case "inspections": return <InspectionsView />;

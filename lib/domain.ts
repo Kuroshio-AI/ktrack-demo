@@ -1,4 +1,5 @@
 import { IS_SAFEEN } from "./client";
+import { isAnomaly } from "./anomaly";
 import { isSurvey } from "./survey";
 import { obligationFor, subseaChecklist } from "./safeen";
 import type {
@@ -131,6 +132,7 @@ export function validateStoredState(value: unknown): value is AppState {
   return candidate.version === STORAGE_VERSION
     && (candidate.savings === undefined || (Array.isArray(candidate.savings) && candidate.savings.every(isSaving)))
     && (candidate.surveys === undefined || (Array.isArray(candidate.surveys) && candidate.surveys.every(isSurvey)))
+    && (candidate.anomalies === undefined || (Array.isArray(candidate.anomalies) && candidate.anomalies.every(isAnomaly)))
     && (counters === undefined || (Boolean(counters) && typeof counters === "object" && !Array.isArray(counters) && Object.values(counters).every((count) => Number.isSafeInteger(count) && count >= 0)))
     && isDateString(candidate.demoDate)
     && isRole(candidate.role)
