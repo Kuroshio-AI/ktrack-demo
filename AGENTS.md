@@ -16,7 +16,7 @@ This repo builds several client demos of KTrack from the same code. Each Vercel 
 | --- | --- | --- | --- |
 | `main` | Kee Safety demo, kuroshio-ktrack.vercel.app | `ktrack-demo` | none (default) |
 | `fls` | DXB FLS certificate tracker | `ktrack-fls-demo`, not created yet; its Production Branch must be `fls` | `NEXT_PUBLIC_CLIENT=fls` |
-| `safeen` | SAFEEN Subsea ROV and survey equipment demo | `ktrack-safeen-demo`, not created yet; its Production Branch must be `safeen` | `NEXT_PUBLIC_CLIENT=safeen` |
+| `safeen` | SAFEEN Subsea ROV and survey equipment demo, ktrack-safeen-demo.vercel.app | `ktrack-safeen-demo` (Production Branch `safeen`) | `NEXT_PUBLIC_CLIENT=safeen` |
 
 - A push to a branch deploys that branch's site. Pushing either branch, merging between them, or running `vercel --prod` is outward-facing: do it only when the user asks.
 - Kee work goes on `main`; FLS work goes on `fls`. On `fls`, FLS-only behaviour stays behind `IS_FLS` (`lib/client.ts`), so `main` can be merged into `fls` cleanly to bring Kee and shared fixes across.
