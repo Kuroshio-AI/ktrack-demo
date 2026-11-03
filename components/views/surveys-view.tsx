@@ -61,7 +61,7 @@ export function SurveysView() {
   return <div className="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
     <Card className="self-start"><CardHeader className="flex-row items-center justify-between gap-3 border-b border-line"><div><div className="eyebrow">{surveys.length} survey{surveys.length === 1 ? "" : "s"}</div><CardTitle>Survey tallies</CardTitle></div>{canEdit && <Button size="sm" onClick={startNew}><Plus data-icon="inline-start" />New survey</Button>}</CardHeader>
       <CardContent className="p-3 sm:p-4">{surveys.length ? <div className="flex flex-col gap-1">{surveys.map((survey) => { const summary = summarizeSurvey(survey); return <button key={survey.id} type="button" onClick={() => { setSelectedId(survey.id); setForm(undefined); }} className={`focus-ring flex items-start justify-between gap-3 rounded-lg px-3 py-3 text-left ${!form && selected?.id === survey.id ? "bg-[#e8f3f8]" : "hover:bg-paper"}`}>
-        <span className="min-w-0"><span className="block whitespace-nowrap text-xs font-semibold tabular-nums text-slate-500">{survey.number} · {formatDate(survey.date)}</span><span className="mt-0.5 line-clamp-2 block font-semibold leading-snug text-navy">{survey.title}</span><span className="mt-0.5 block text-xs text-slate-500">{survey.points.length} points{summary.repair ? ` · ${summary.repair} for repair` : ""}{summary.monitor ? ` · ${summary.monitor} to monitor` : ""}</span></span>
+        <span className="min-w-0"><span className="block whitespace-nowrap text-xs font-semibold tabular-nums text-slate-500">{survey.number} · {formatDate(survey.date)}</span><span className="mt-0.5 line-clamp-2 block font-semibold leading-snug text-navy">{survey.title}</span><span className="mt-0.5 block text-xs text-slate-500">{survey.points.length} point{survey.points.length === 1 ? "" : "s"}{summary.repair ? ` · ${summary.repair} for repair` : ""}{summary.monitor ? ` · ${summary.monitor} to monitor` : ""}</span></span>
         <Badge className="shrink-0" variant={survey.status === "Issued" ? "success" : "outline"}>{survey.status}</Badge>
       </button>; })}</div> : <p className="px-3 py-10 text-center text-sm text-slate-500">No surveys yet. Start one when the ROV goes down on a line or riser.</p>}</CardContent>
     </Card>
@@ -174,7 +174,7 @@ function StripChart({ survey, campaigns, onSwitch, onPick }: { survey: Survey; c
   const seabed = graded.filter(({ point }) => point.code === "FS" || point.code === "EXP");
   const label = "text-[11px] font-semibold uppercase tracking-[.08em] text-slate-500";
   return <div className="rounded-lg border border-line bg-paper px-4 pb-3 pt-3">
-    {campaigns.length > 1 && <div className="mb-3 flex items-center justify-between gap-3"><span className={label}>Campaign</span><div role="group" aria-label="Campaign year" className="flex rounded-lg border border-line bg-white p-0.5">{campaigns.map((item) => <button key={item.id} type="button" aria-pressed={item.id === survey.id} onClick={() => onSwitch(item.id)} title={item.number} className={`focus-ring rounded-md px-3 py-1 text-xs font-semibold tabular-nums transition-colors ${item.id === survey.id ? "bg-navy text-white" : "text-slate-600 hover:bg-paper"}`}>{item.date.slice(0, 4)}</button>)}</div></div>}
+    {campaigns.length > 1 && <div className="mb-3 flex items-center justify-between gap-3"><span className={label}>Campaign</span><div role="group" aria-label="Campaign year" className="flex rounded-lg border border-line bg-white p-0.5">{campaigns.map((item) => <button key={item.id} type="button" aria-pressed={item.id === survey.id} onClick={() => onSwitch(item.id)} title={item.number} className={`focus-ring rounded-md px-3 py-1 text-xs font-semibold tabular-nums transition-colors ${item.id === survey.id ? "bg-navy text-white" : "text-slate-600 hover:bg-paper"}`}>{campaignLabel(item, campaigns)}</button>)}</div></div>}
     <div className="grid grid-cols-[64px_minmax(0,1fr)] items-center gap-x-3 gap-y-2">
       <span className={label}>Points</span>
       <div className="relative mx-2 h-6">
@@ -200,12 +200,16 @@ function StripChart({ survey, campaigns, onSwitch, onPick }: { survey: Survey; c
       </div>
     </div>
     <div className="mt-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 text-xs">
-      <span className="font-mono text-slate-500">KP {kpText(from)} → {kpText(from + span)} · {survey.points.length} points · {survey.date.slice(0, 4)}</span>
+      <span className="font-mono text-slate-500">KP {kpText(from)}{graded.length > 1 ? ` → ${kpText(from + span)}` : ""} · {survey.points.length} point{survey.points.length === 1 ? "" : "s"} · {campaignLabel(survey, campaigns)}</span>
       <span className="flex flex-wrap gap-x-4 font-semibold tabular-nums"><span className="text-[#187348]">{summary.accept} accept</span><span className="text-[#8a5d00]">{summary.monitor} monitor</span><span className="text-danger">{summary.repair} repair</span>{summary.pending > 0 && <span className="text-slate-500">{summary.pending} pending</span>}</span>
     </div>
     <div className="mt-1.5 flex flex-wrap gap-x-4 text-[11px] text-slate-500"><span><span className="mr-1 inline-block h-0.5 w-3 bg-accent align-middle" />CP reading</span><span><span className="mr-1 inline-block h-2 w-3 rounded-sm bg-[#cfd9c4] align-middle" />Buried</span><span><span className="mr-1 inline-block h-2 w-3 rounded-sm bg-[#8aa1b3] align-middle" />Exposed</span><span><span className="mr-1 inline-block h-2 w-3 rounded-sm bg-[#d99512] align-middle" />Free span</span></div>
   </div>;
 }
+
+// A campaign by its year, or by month and year when another campaign shares that year.
+const campaignLabel = (survey: Survey, campaigns: Survey[]) => campaigns.some((item) => item.id !== survey.id && item.date.slice(0, 4) === survey.date.slice(0, 4))
+  ? new Date(`${survey.date}T00:00:00`).toLocaleDateString("en-GB", { month: "short", year: "numeric" }) : survey.date.slice(0, 4);
 
 const CHANGE_TONE: Record<Change, "danger" | "warning" | "outline" | "success"> = { New: "warning", Worsened: "danger", Unchanged: "outline", Resolved: "success" };
 // Year on year for the same line: what is new, worse, unchanged or fixed since the last campaign.
@@ -217,7 +221,7 @@ function Comparison({ previous, survey, changes, print }: { previous: Survey; su
       <div className="flex flex-wrap gap-x-4 text-xs font-semibold tabular-nums">{(["New", "Worsened", "Unchanged", "Resolved"] as Change[]).map((change) => <span key={change} className={change === "Worsened" ? "text-danger" : change === "New" ? "text-[#8a5d00]" : change === "Resolved" ? "text-[#187348]" : "text-slate-500"}>{count(change)} {change.toLowerCase()}</span>)}</div>
     </div>
     <div className="relative overflow-x-auto"><table className={`w-full min-w-[560px] text-left ${print ? "mt-3 text-xs" : "text-sm"}`}>
-      <thead><tr className="border-b border-line text-xs text-slate-500"><th className={`py-2 pr-3 font-semibold ${print ? "" : "pl-4"}`}>KP</th><th className="py-2 pr-3 font-semibold">Item</th><th className="py-2 pr-3 text-right font-semibold">{previous.date.slice(0, 4)}</th><th className="py-2 pr-3 text-right font-semibold">{survey.date.slice(0, 4)}</th><th className={`py-2 font-semibold ${print ? "text-right" : "pr-4"}`}>Change</th></tr></thead>
+      <thead><tr className="border-b border-line text-xs text-slate-500"><th className={`py-2 pr-3 font-semibold ${print ? "" : "pl-4"}`}>KP</th><th className="py-2 pr-3 font-semibold">Item</th><th className="py-2 pr-3 text-right font-semibold">{campaignLabel(previous, [previous, survey])}</th><th className="py-2 pr-3 text-right font-semibold">{campaignLabel(survey, [previous, survey])}</th><th className={`py-2 font-semibold ${print ? "text-right" : "pr-4"}`}>Change</th></tr></thead>
       <tbody>{changes.map((row, index) => <tr key={`${row.kp}-${row.item}-${index}`} className="border-b border-line/70 last:border-0">
         <td className={`py-1.5 pr-3 font-mono text-xs font-semibold text-navy ${print ? "" : "pl-4"}`}>{kpText(row.kp)}</td>
         <td className="py-1.5 pr-3 text-navy">{row.item}</td>

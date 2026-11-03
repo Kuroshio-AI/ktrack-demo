@@ -115,3 +115,22 @@ test("issued campaigns file anomalies, match them year on year and close them ou
   const planned = advanceAnomaly(state, span.id, "Book DSV", { action: "Grout bags", target: "2026-12-15" }, "Reviewer");
   assert.deepEqual((({ status, action, target }) => ({ status, action, target }))(planned.anomalies!.find((item) => item.id === span.id)!), { status: "Action planned", action: "Grout bags", target: "2026-12-15" });
 });
+
+test("a repaired anomaly starts its re-inspection survey, and issuing it re-inspects the anomaly", async () => {
+  const { subseaDemo } = await import("./safeen-sample");
+  const { advanceAnomaly, startReinspection } = await import("./anomaly");
+  const { issueBlockers, issueSurvey, saveSurvey } = await import("./survey");
+  let state = subseaDemo("2026-11-03");
+  const span = state.anomalies!.find((item) => item.number === "ANM-0231")!;
+  assert.equal(startReinspection(state, span.id, "Admin").surveyId, undefined);
+  state = advanceAnomaly(state, span.id, "Grout bags", {}, "Admin");
+  state = advanceAnomaly(state, span.id, "WO-26-0301", {}, "Admin");
+  const started = startReinspection(state, span.id, "Admin");
+  assert.equal(startReinspection(started.state, span.id, "Admin").surveyId, started.surveyId);
+  const draft = started.state.surveys!.find((item) => item.id === started.surveyId)!;
+  assert.deepEqual(draft.points.map((point) => point.kp), [12.4]);
+  state = saveSurvey(started.state, { ...draft, points: [{ ...draft.points[0], cp: -990 }] }, "Admin");
+  assert.deepEqual(issueBlockers(state.surveys!.find((item) => item.id === draft.id)!, state), []);
+  state = issueSurvey(state, draft.id, "Reviewer");
+  assert.equal(state.anomalies!.find((item) => item.id === span.id)?.status, "Re-inspected");
+});

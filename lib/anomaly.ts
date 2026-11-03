@@ -1,5 +1,5 @@
 import { activity, isDateString, nowIso } from "./domain";
-import { gradePoint, KIND_OF_CODE, worse, type FindingKind, type Survey, type SurveyPoint, type SurveyResult } from "./survey";
+import { gradePoint, KIND_OF_CODE, newPoint, saveSurvey, unfitEquipment, worse, type FindingKind, type Survey, type SurveyPoint, type SurveyResult } from "./survey";
 import type { AppState, Role } from "./types";
 
 // The anomaly register: every finding an issued survey makes becomes a tracked item, kept from the day it is found until it
@@ -83,6 +83,23 @@ export function advanceAnomaly(state: AppState, id: string, note: string, change
     anomalies: state.anomalies!.map((item) => item.id === id ? { ...item, status: next, action, target, history: [...item.history, event(next, state.demoDate, timestamp, actor, note.trim())] } : item),
     activity: [activity(`Anomaly ${next.toLowerCase()}`, `${anomaly.number} · ${note.trim()}`, actor, timestamp), ...state.activity],
   };
+}
+
+// A repaired anomaly is re-inspected by the next survey over its KP. This starts that survey as a draft at the anomaly's
+// point, on the last campaign's line settings and with its instruments that are still fit to use; issuing it closes the loop.
+export function startReinspection(state: AppState, id: string, actor = state.role, timestamp = nowIso()): { state: AppState; surveyId?: string } {
+  const anomaly = state.anomalies?.find((item) => item.id === id);
+  const last = anomaly && state.surveys?.find((item) => item.id === anomaly.sightings.at(-1)?.surveyId);
+  if (!anomaly || !last || anomaly.status !== "Repaired" || actor === "Manager") return { state };
+  const draft = state.surveys!.find((item) => item.status === "Draft" && item.line === anomaly.line && item.points.some((point) => near(point.kp, anomaly.kp)));
+  if (draft) return { state, surveyId: draft.id };
+  const unfit = unfitEquipment(last, state.records, state.demoDate).map(({ record }) => record.id);
+  const next = saveSurvey(state, {
+    title: `Re-inspection of ${anomaly.number}, ${anomaly.kind.toLowerCase()} at KP ${anomaly.kp.toFixed(3)}`, line: last.line, site: last.site, date: state.demoDate,
+    rovId: last.rovId, equipmentIds: last.equipmentIds.filter((item) => !unfit.includes(item)),
+    nominalWall: last.nominalWall, minWall: last.minWall, spanLimit: last.spanLimit, points: [newPoint(anomaly.kp)],
+  }, actor, timestamp);
+  return { state: next, surveyId: next.surveys?.[0].id };
 }
 
 // Year on year: the same line in two campaigns, point matched to point by KP. Each measurement that failed in either campaign,

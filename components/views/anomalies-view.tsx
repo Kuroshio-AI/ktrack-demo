@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { advanceAnomaly, ANOMALY_STATUSES, canAdvance, NEXT_STEP, type Anomaly } from "@/lib/anomaly";
+import { advanceAnomaly, ANOMALY_STATUSES, canAdvance, NEXT_STEP, startReinspection, type Anomaly } from "@/lib/anomaly";
 import { formatDate } from "@/lib/utils";
 
 const TONE = { Accept: "success", Monitor: "warning", Repair: "danger" } as const;
@@ -65,6 +65,11 @@ export function AnomaliesView() {
 
 function AnomalyDetail({ anomaly }: { anomaly: Anomaly }) {
   const { state, update } = useApp();
+  const router = useRouter();
+  function reinspect() {
+    let surveyId: string | undefined;
+    if (update((current) => { const result = startReinspection(current, anomaly.id, current.role); surveyId = result.surveyId; return result.state; }) && surveyId) router.push(`/surveys?survey=${surveyId}`);
+  }
   const next = NEXT_STEP[anomaly.status];
   const [note, setNote] = useState("");
   const [action, setAction] = useState(anomaly.action);
@@ -123,7 +128,7 @@ function AnomalyDetail({ anomaly }: { anomaly: Anomaly }) {
           <div className="flex justify-end sm:col-span-2"><Button onClick={advance}>{STEP_COPY[next].button}</Button></div>
         </div> : <p className="mt-1 text-sm text-slate-500">{anomaly.status === "Re-inspected" ? "A reviewer signs the close-out. Switch to Reviewer or Admin." : "Manager is read-only here. Switch to Engineer, Reviewer or Admin."}</p>}
       </section>
-        : anomaly.status === "Repaired" ? <p className="rounded-lg bg-paper px-4 py-3 text-sm text-slate-600">Waiting for re-inspection. The next survey of {short(anomaly.line)} confirms the repair, or sends it back to Action planned if it still fails.</p>
+        : anomaly.status === "Repaired" ? <div className="flex flex-col gap-3 rounded-lg bg-paper px-4 py-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-slate-600"><span className="font-semibold text-navy">Next: re-inspect it.</span> Survey KP {anomaly.kp.toFixed(3)} again and issue the report. If it passes, this moves to Re-inspected; if it still fails, back to Action planned.</p>{state.role !== "Manager" && <Button className="shrink-0" onClick={reinspect}>Start re-inspection survey</Button>}</div>
         : <p className="rounded-lg bg-[#e7f4ed] px-4 py-3 text-sm text-[#187348]">Closed out. A new finding here would open a new anomaly.</p>}
     </CardContent></Card>;
 }
