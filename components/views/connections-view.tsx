@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { downloadTemplate } from "@/lib/ams";
-import { class2Text, connectionLabel, limitText, TALLY_COLUMNS } from "@/lib/tally";
+import { class2Text, connectionMatches, limitText, TALLY_COLUMNS } from "@/lib/tally";
 
 // The dimension tables every tally sheet is checked against: DS-1 for proprietary connections, API RP 7G-2 for API ones. The
 // demo ships made-up sample rows; the client's own tables come in from their spreadsheets through the template's columns.
@@ -32,7 +32,7 @@ export function ConnectionsView() {
   }, [connections]);
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const standards = connections.some((spec) => spec.standard);
-  const shown = connections.filter((spec) => words.every((word) => connectionLabel(spec).toLowerCase().includes(word)));
+  const shown = connections.filter((spec) => connectionMatches(spec, words));
   const canImport = state.role === "Admin" || state.role === "Manager";
 
   return <div className="flex flex-col gap-5">

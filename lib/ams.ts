@@ -36,6 +36,8 @@ const hasHeader = (row: unknown[], header: string) => row.some((cell) => normal(
 type Bound = Exclude<keyof Limit, "column">;
 type End = { index: number; column: string; bound: Bound };
 const BOUND_LABEL: Record<Bound, string> = { min: "min", max: "max", class2Min: "class 2 min", class2Max: "class 2 max" };
+const MAX_LIMIT_INCHES = 100;
+const CHECKED_LIMITS = new Set(TALLY_COLUMNS.flatMap((column) => column.limit ?? []));
 
 function limitEnds(headers: string[]): End[] {
   return headers.flatMap((header, index) => {
@@ -70,6 +72,8 @@ function readLimits(values: unknown[], ends: End[], unit: "in" | "mm"): Limit[] 
       const value = typeof cell === "number" ? cell : Number(trimValue(cell));
       if (!Number.isFinite(value) || value <= 0) return { field: `${column} ${BOUND_LABEL[end.bound]}`, message: `${column} ${BOUND_LABEL[end.bound]} must be a positive number` };
       limit[end.bound] = toInches(value, unit, end.bound);
+      // A date-formatted cell reads as a serial in the tens of thousands, and as a maximum it would pass every reading.
+      if (limit[end.bound]! > MAX_LIMIT_INCHES) return { field: `${column} ${BOUND_LABEL[end.bound]}`, message: `${column} ${BOUND_LABEL[end.bound]} is ${value}, too large for a limit. Check the cell isn't a date or a typing slip` };
     }
     const { min, max, class2Min, class2Max } = limit;
     if (min !== undefined && max !== undefined && min > max) return { field: column, message: `${column} min is above its max` };
@@ -99,7 +103,24 @@ export function downloadTemplate() {
   XLSX.writeFile(book, "ktrack-dimension-table-template.xlsx");
 }
 
-export type ConnectionsPreview = { specs: ConnectionSpec[]; errors: ImportError[]; shared: number };
+export type ConnectionsPreview = { specs: ConnectionSpec[]; errors: ImportError[]; shared: number; ignored: string[] };
+
+// Columns that check nothing on a tally sheet: headers that aren't "<dimension> min" or "max", and limits no tally column
+// reads. Limit names match exactly, so a table with "Tong Space Pin" would otherwise import cleanly and check nothing.
+function unusedColumns(headers: string[], keys: readonly string[]) {
+  const ends = limitEnds(headers);
+  return headers.flatMap((header, index) => {
+    if (!header || keys.some((key) => normal(key) === normal(header))) return [];
+    const end = ends.find((item) => item.index === index);
+    return !end ? [header] : CHECKED_LIMITS.has(end.column) ? [] : [end.column];
+  });
+}
+
+// CSV turns a size like 4 1/2 and a limit like 5 13/32 into dates, and they import as large plain numbers.
+export function parseConnectionsFile(name: string, buffer: ArrayBuffer): ConnectionsPreview {
+  if (!/\.xlsx?$/i.test(name)) throw new Error("Save the dimension table as an Excel workbook (.xlsx), then import that. CSV turns sizes and fractions into dates.");
+  return parseConnectionsWorkbook(buffer);
+}
 
 // Reads the first sheet with a Size, Weight, Connection and Grade header row. Like the printed table, a blank size, weight or
 // connection repeats the row above, so each grade can sit on its own line under one connection. Any other sheet with a
@@ -109,12 +130,16 @@ export function parseConnectionsWorkbook(buffer: ArrayBuffer): ConnectionsPrevie
   const sheets = workbook.SheetNames.map((name) => ({ name, matrix: XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[name], { header: 1, defval: "", raw: true }) }));
   const main = sheets.map((sheet) => ({ ...sheet, at: sheet.matrix.findIndex((row) => KEY_HEADERS.every((header) => hasHeader(row, header))) })).find((sheet) => sheet.at !== -1);
   if (!main) throw new Error(`Use the dimension table template: one header row with ${KEY_HEADERS.join(", ")}, then "<dimension> min" and "<dimension> max" columns.`);
-  const preview = readConnections(main.matrix[main.at].map(trimValue), main.matrix.slice(main.at + 1), main.at + 2);
+  const headers = main.matrix[main.at].map(trimValue);
+  const preview = readConnections(headers, main.matrix.slice(main.at + 1), main.at + 2);
+  const ignored = unusedColumns(headers, [...KEY_HEADERS, "Standard", "Unit"]);
   let shared = 0;
   for (const sheet of sheets.filter((item) => item !== main)) {
     const at = sheet.matrix.findIndex((row) => hasHeader(row, "Connection") && !hasHeader(row, "Size") && limitEnds(row.map(trimValue)).length > 0);
     if (at === -1) continue;
-    const { byConnection, errors } = readConnectionLimits(sheet.name, sheet.matrix[at].map(trimValue), sheet.matrix.slice(at + 1), at + 2);
+    const sheetHeaders = sheet.matrix[at].map(trimValue);
+    const { byConnection, errors } = readConnectionLimits(sheet.name, sheetHeaders, sheet.matrix.slice(at + 1), at + 2);
+    ignored.push(...unusedColumns(sheetHeaders, ["Connection", "Unit"]));
     preview.errors.push(...errors);
     shared += byConnection.size;
     for (const spec of preview.specs) {
@@ -122,10 +147,10 @@ export function parseConnectionsWorkbook(buffer: ArrayBuffer): ConnectionsPrevie
       spec.limits.push(...extra.filter((limit) => !spec.limits.some((own) => own.column === limit.column)));
     }
   }
-  return { ...preview, shared };
+  return { ...preview, shared, ignored: [...new Set(ignored)] };
 }
 
-function readConnections(headers: string[], rows: unknown[][], firstRow: number): Omit<ConnectionsPreview, "shared"> {
+function readConnections(headers: string[], rows: unknown[][], firstRow: number): Pick<ConnectionsPreview, "specs" | "errors"> {
   const at = (header: string) => headers.findIndex((cell) => normal(cell) === normal(header));
   const keys = KEY_HEADERS.map(at);
   const standardAt = at("Standard");

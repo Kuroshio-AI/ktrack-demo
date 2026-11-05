@@ -156,6 +156,12 @@ export const class2Text = (limit: Limit) => {
 };
 
 export const connectionLabel = (spec: Pick<ConnectionSpec, "size" | "weight" | "connection" | "grade">) => `${spec.size}" ${spec.weight} ${spec.connection} grade ${spec.grade}`;
+// The dimension table filter. A number is a whole size or connection part, so "5" isn't "50", and a weight can be typed partway;
+// a word is the start of a part, so "G" finds G and G105.
+export function connectionMatches(spec: Pick<ConnectionSpec, "size" | "weight" | "connection" | "grade">, words: string[]) {
+  const parts = [spec.size, spec.connection, spec.grade].join(" ").toLowerCase().split(/\s+/);
+  return words.every((word) => spec.weight.startsWith(word) || parts.some((part) => /^\d/.test(word) ? part === word : part.startsWith(word)));
+}
 
 // The new tally form picks a row one F.582 header field at a time. A field keeps the wanted value while a row has it, else
 // takes the first that does, so changing the size keeps the grade if the new size comes in that grade.

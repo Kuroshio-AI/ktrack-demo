@@ -179,6 +179,29 @@ test("recording a calibration sets both dates, clears the instrument's alert and
   assert.throws(() => ams.recordCalibration(state, "gone", "2026-10-23", "2027-10-23"), /no longer listed/);
 });
 
+test("an import refuses CSV and date-like limits, and names the columns that check nothing", () => {
+  assert.throws(() => ams.parseConnectionsFile("table.csv", workbook([["Size", "Weight", "Connection", "Grade", "Box OD min"], ["5", "19.50", "Demo 50", "S", 6.19]])), /Excel workbook/);
+  assert.equal(ams.parseConnectionsFile("TABLE.XLSX", workbook([["Size", "Weight", "Connection", "Grade", "Box OD min"], ["5", "19.50", "Demo 50", "S", 6.19]])).specs.length, 1);
+  const dated = ams.parseConnectionsWorkbook(workbook([["Size", "Weight", "Connection", "Grade", "Box OD max"], ["5", "19.50", "Demo 50", "S", 48347]]));
+  assert.deepEqual([dated.specs.length, dated.errors[0].field], [0, "Box OD max"]);
+  assert.match(dated.errors[0].message, /date/);
+  const { specs, ignored } = ams.parseConnectionsWorkbook(workbook([["Size", "Weight", "Connection", "Grade", "Standard", "Unit", "Box OD min", "Tong Space Pin min", "Tong Space Pin max", "Remarks"], ["5", "19.50", "Demo 50", "S", "Demo", "in", 6.19, 6, 7, "x"]]));
+  assert.deepEqual([specs.length, ignored], [1, ["Tong Space Pin", "Remarks"]]);
+  assert.deepEqual(ams.parseConnectionsWorkbook(workbook(ams.templateMatrix())).ignored, []);
+});
+
+test("the dimension table filter matches whole numbers and the start of words", () => {
+  const rows = [{ size: "5", weight: "19.50", connection: "Demo 50", grade: "G" }, { size: "5 1/2", weight: "21.90", connection: "Demo 54", grade: "S" }, { size: "4 1/2", weight: "16.60", connection: "Demo 50", grade: "G105" }, { size: "3 1/2", weight: "9.50", connection: "XT-M38", grade: "V-150" }];
+  const found = (query: string) => rows.filter((row) => ams.connectionMatches(row, query.toLowerCase().split(/\s+/).filter(Boolean))).map((row) => row.size);
+  assert.deepEqual(found("5 G"), ["5"], "the word grade in the label no longer matches G, and 5 isn't 50");
+  assert.deepEqual(found("5"), ["5", "5 1/2"]);
+  assert.deepEqual(found("demo 50"), ["5", "4 1/2"]);
+  assert.deepEqual(found("g"), ["5", "4 1/2"], "G and G105");
+  assert.deepEqual(found("19"), ["5"], "a weight typed partway");
+  assert.deepEqual(found("xt"), ["3 1/2"]);
+  assert.deepEqual(found(""), ["5", "5 1/2", "4 1/2", "3 1/2"]);
+});
+
 test("pipes are added and removed at the end, a sheet keeps one, and deleting a draft frees its work order", () => {
   const state = { ...ams.createInitialState("2026-10-23"), connections: [spec] };
   const { state: opened, inspection } = ams.createTally(state, { ...tallyInput, joints: 2 });
