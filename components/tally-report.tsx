@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { PhotoImage, photoTitle } from "@/components/tally-photos";
 import { Signature } from "@/components/warranty-document";
 import { ADDITIONAL_SERVICES, INSPECTION_PROGRAM } from "@/lib/ams";
-import { AMS_NAME } from "@/lib/client";
+import { AMS_NAME, IS_TRIAL } from "@/lib/client";
 import { class2Text, CODES, gradePipe, inches, limitFailure, limitFor, limitText, readingText, reasons, summarizeTally, TALLY_COLUMNS, type Group } from "@/lib/tally";
 import type { AssetRecord, Certificate, DamageOutcome, Equipment, FinalClass, Inspection } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
@@ -81,11 +81,11 @@ export function TallyReport({ inspection, record, certificate, equipment, qr, qr
           : qrPending && <div className="grid size-24 shrink-0 place-items-center border border-dashed border-slate-400 p-2 text-center text-[9px] font-semibold leading-snug text-slate-500">QR code added when back online</div>}
         <div className="grid flex-1 grid-cols-3 gap-6"><Signature label="Customer signature" name="" /><Signature label="Inspector name & signature" name={inspection.inspector} date={inspection.submittedAt} image={inspection.signature} /><Signature label="Approved by" name={certificate ? "Authorised reviewer" : "Awaiting approval"} date={certificate ? inspection.reviewedAt : undefined} /></div>
       </div>
-      <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1.5 text-[9px] text-slate-500"><span>Laid out as F.581 · filled in by KTrack from tally sheet F.582 · demo report, fictional job{spec.sample ? ", sample limits" : ""}</span><span>Page 1 of {pages}</span></footer>
+      <footer className="mt-2 flex justify-between border-t border-[#0b3151] pt-1.5 text-[9px] text-slate-500"><span>Laid out as F.581 · filled in by KTrack from tally sheet F.582{!IS_TRIAL && " · demo report, fictional job"}{spec.sample ? ", sample limits" : ""}</span><span>Page 1 of {pages}</span></footer>
     </div>
 
     <div className="tally-page mt-8 border-[3px] border-[#0b3151] p-4">
-      <header className="flex items-end justify-between"><div><div className="text-sm font-black uppercase tracking-[.08em] text-navy">{AMS_NAME}</div><div className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-600">Drill pipe inspection tally sheet</div></div><div className="tally-mono text-right text-[10px] text-slate-600">{record.assetRef} · {record.owner} · {record.site} · well {job.well || "–"}<br />{spec.size}&quot; {spec.weight} lb/ft · {spec.grade} · {spec.connection} · {job.range} · nom. wall {inches(job.nominalWall)}</div></header>
+      <header className="flex items-end justify-between"><div><div className="text-sm font-black uppercase tracking-[.08em] text-navy">{AMS_NAME}</div><div className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-600">Drill pipe inspection tally sheet</div></div><div className="tally-mono text-right text-[10px] text-slate-600">{record.assetRef} · {record.owner} · {record.site} · well {job.well || "–"}<br />{spec.size}&quot; {spec.weight} lb/ft · {spec.grade} · {spec.connection} · {job.range} · nom. wall {inches(job.nominalWall)}<br />{job.standard} · {job.serviceCategory}</div></header>
       <table className="mt-2 w-full border-collapse text-[7.5px] leading-tight">
         <thead>
           <tr className="form-band font-bold uppercase"><th rowSpan={2} className="border border-[#0b3151] px-0.5 py-0.5 text-left">ID no.</th>{GROUPS.map((group) => <th key={group} colSpan={TALLY_COLUMNS.filter((column) => column.group === group).length} className="border border-[#0b3151] py-0.5">{group}</th>)}</tr>

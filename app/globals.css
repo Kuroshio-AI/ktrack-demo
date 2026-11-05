@@ -68,6 +68,9 @@ a { color: inherit; text-decoration: none; }
   .f581-page { page: f581; zoom: 0.8; }
   .tally-page { page: tally; break-before: page; }
   .photo-page { page: f581; break-before: page; }
+  /* Firefox and Zen print the tally on a portrait page but still lay it out landscape, so zoom alone leaves it as wide. This
+     width is the landscape layout's, and at this zoom it comes to 190mm, inside A4 portrait's margins. */
+  @supports (-moz-appearance: none) { .tally-page { zoom: 0.66; width: 288mm; } }
 }
 
 /* A tally photo opens large from the middle of the screen: a modal, so no origin to grow from. */
