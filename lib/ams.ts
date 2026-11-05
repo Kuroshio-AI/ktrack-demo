@@ -251,13 +251,12 @@ export function amsWorkQueue(state: AppState): WorkItem[] {
   return items;
 }
 
-// A sheet's pipes follow the rack: one is added at the end, and only an empty last pipe comes off, so numbers never shift
-// under readings already taken.
+// A sheet's pipes follow the rack: they are added and removed at the end, so numbers never shift under readings already
+// taken. The page asks before removing a pipe that has readings.
 export const isEmptyPipe = (joint: Joint) => !joint.serial && !joint.coating && !joint.finalClass && !Object.keys(joint.values).length && !Object.values(joint.codes).some(Boolean);
 export const addPipe = (joints: Joint[]): Joint[] => [...joints, { no: (joints.at(-1)?.no ?? 0) + 1, values: {}, codes: {} }];
 export function removeLastPipe(joints: Joint[]): Joint[] {
-  const last = joints.at(-1);
-  if (!last || joints.length === 1 || !isEmptyPipe(last)) throw new Error("Only an empty last pipe can be removed, and a sheet keeps at least one.");
+  if (joints.length < 2) throw new Error("A tally sheet keeps at least one pipe.");
   return joints.slice(0, -1);
 }
 

@@ -304,6 +304,11 @@ export function TallyView() {
     changeJoints(addPipe);
     requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`input[aria-label="Pipe ${no} identification number"]`)?.focus());
   }
+  function removeOnePipe() {
+    if (!lastPipe || pipes.length < 2) return;
+    if (!isEmptyPipe(lastPipe) && !window.confirm(`Remove pipe ${lastPipe.no}${lastPipe.serial ? ` (${lastPipe.serial})` : ""}? Its readings will be lost.`)) return;
+    changeJoints(removeLastPipe);
+  }
 
   return <div className="flex flex-col gap-5">
     <Card><CardHeader className="flex-row items-start justify-between gap-3"><div><div className="eyebrow">Jobs</div><CardTitle>{tallies.length} tally sheet{tallies.length === 1 ? "" : "s"}</CardTitle></div>{canWork && !creating && <Button className="press" onClick={() => setCreating(true)}><Plus data-icon="inline-start" />New tally sheet</Button>}</CardHeader>
@@ -337,7 +342,7 @@ export function TallyView() {
         <ReportDetails key={`details-${selected.id}`} inspection={selected} disabled={!canEdit} onChange={changeJob} />
         {expired.length > 0 && <div role="alert" className="animate-rise flex gap-3 rounded-lg border border-[#f0c2c3] bg-[#fff6f6] px-4 py-3 text-sm text-danger"><AlertTriangle className="mt-0.5 size-4 shrink-0" /><div><strong>This sheet can&apos;t be submitted.</strong> {expired.map((item) => `${item.kind} ${item.serial} calibration expired ${formatDate(item.calibrationDue)}`).join("; ")}. Record the new calibration in <Link href="/equipment" className="font-semibold underline">Equipment</Link>, or untick the instrument in Report details.</div></div>}
         <TallyGrid key={`grid-${selected.id}`} inspection={selected} rows={rows?.rows} disabled={!canEdit} onChange={changeJoints} />
-        {canEdit && !rows && <div className="-mt-2 flex flex-wrap items-center gap-2"><Button variant="outline" size="sm" className="press" onClick={addOnePipe}><Plus data-icon="inline-start" />Add pipe</Button>{lastPipe && pipes.length > 1 && isEmptyPipe(lastPipe) && <Button variant="ghost" size="sm" className="press" onClick={() => changeJoints(removeLastPipe)}><Minus data-icon="inline-start" />Remove pipe {lastPipe.no}</Button>}</div>}
+        {canEdit && !rows && <div className="-mt-2 flex flex-wrap items-center gap-2"><Button variant="outline" size="sm" className="press" onClick={addOnePipe}><Plus data-icon="inline-start" />Add pipe</Button>{lastPipe && <Button variant="outline" size="sm" className="press" disabled={pipes.length < 2} title={pipes.length < 2 ? "A tally sheet keeps at least one pipe" : undefined} onClick={removeOnePipe}><Minus data-icon="inline-start" />Remove pipe {lastPipe.no}</Button>}</div>}
         <div><label className="eyebrow" htmlFor="tally-notes">Comments</label><Textarea id="tally-notes" className="mt-1.5" defaultValue={selected.notes} key={selected.id} disabled={!canEdit} onBlur={(event) => { if (event.currentTarget.value !== selected.notes) saveNotes(event.currentTarget.value); }} placeholder="Conditions on site, anything the reviewer should know…" /></div>
         <TallyPhotos key={`photos-${selected.id}`} inspection={selected} disabled={!canEdit} />
         {selected.reviewerComment && selected.status === "Returned" && <div className="flex gap-2 rounded-lg border border-[#f0c2c3] bg-[#fff6f6] px-3 py-3 text-sm text-danger"><X className="mt-0.5 size-4 shrink-0" /><span><strong>Returned for correction.</strong> {selected.reviewerComment}</span></div>}

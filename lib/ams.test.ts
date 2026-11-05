@@ -179,14 +179,14 @@ test("recording a calibration sets both dates, clears the instrument's alert and
   assert.throws(() => ams.recordCalibration(state, "gone", "2026-10-23", "2027-10-23"), /no longer listed/);
 });
 
-test("pipes are added at the end, only an empty last pipe comes off, and deleting a draft frees its work order", () => {
+test("pipes are added and removed at the end, a sheet keeps one, and deleting a draft frees its work order", () => {
   const state = { ...ams.createInitialState("2026-10-23"), connections: [spec] };
   const { state: opened, inspection } = ams.createTally(state, { ...tallyInput, joints: 2 });
   const added = ams.addPipe(inspection.joints!);
   assert.deepEqual(added.map((joint) => joint.no), [1, 2, 3]);
   assert.deepEqual(ams.removeLastPipe(added).map((joint) => joint.no), [1, 2]);
   const measured = added.map((joint) => joint.no === 3 ? { ...joint, values: { length: 31 } } : joint);
-  assert.throws(() => ams.removeLastPipe(measured), /empty last pipe/);
+  assert.deepEqual([ams.isEmptyPipe(measured[2]), ams.removeLastPipe(measured).length], [false, 2], "a measured last pipe comes off too");
   assert.throws(() => ams.removeLastPipe([inspection.joints![0]]), /at least one/);
   const deleted = ams.deleteTally(opened, inspection.id, "Engineer");
   assert.deepEqual([deleted.inspections.length, deleted.records.length], [0, 0], "the sheet and the job it opened are gone");
