@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { IS_GEX } from "@/lib/client";
 import { fieldStore, redis, sameOrigin, uuidPattern } from "@/lib/field";
 
 export const TOKEN_TTL_SECONDS = 24 * 60 * 60;
@@ -14,6 +15,8 @@ export type DemoTokenSnapshot = {
   kind?: "warranty";
   // Names the certificate's live status in Redis, so a QR printed before a revoke shows the revoke.
   statusId?: string;
+  // GEX: a few key results, so a scan shows them without a server lookup; kept short so the QR stays scannable.
+  summary?: [string, string][];
   exp: number;
 };
 
@@ -35,6 +38,10 @@ export function createDemoToken(snapshot: Omit<DemoTokenSnapshot, "exp">, secret
   return `${encoded}.${sign(encoded, secret)}`;
 }
 
+const isSummaryText = (value: unknown) => typeof value === "string" && value.trim().length > 0 && value.length <= 48 && !/[<>\u0000-\u001f\u007f]/.test(value);
+export const isTokenSummary = (value: unknown): value is [string, string][] =>
+  Array.isArray(value) && value.length <= 8 && value.every((pair) => Array.isArray(pair) && pair.length === 2 && pair.every(isSummaryText));
+
 function isSnapshot(value: unknown): value is DemoTokenSnapshot {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<DemoTokenSnapshot>;
@@ -42,6 +49,7 @@ function isSnapshot(value: unknown): value is DemoTokenSnapshot {
     && ["Valid", "Expired", "Revoked", "Superseded"].includes(candidate.status as string)
     && (candidate.kind === undefined || candidate.kind === "warranty")
     && (candidate.statusId === undefined || typeof candidate.statusId === "string")
+    && (candidate.summary === undefined || isTokenSummary(candidate.summary))
     && typeof candidate.exp === "number" && Number.isSafeInteger(candidate.exp);
 }
 
@@ -70,6 +78,7 @@ const liveKey = (statusId: string) => `cert-status:${statusId}`;
 const finalStatuses = ["Revoked", "Superseded"];
 
 // A token lives 24 hours, so a status kept that long after the change covers every QR printed before it.
+// A printed GEX certificate's QR lasts as long as the certificate, so its revoke lasts that long too.
 export async function setLiveStatus(request: Request, env: Record<string, string | undefined> = process.env): Promise<Response> {
   const secret = env.DEMO_CERT_TOKEN_SECRET ?? "";
   const store = fieldStore(env);
@@ -78,7 +87,7 @@ export async function setLiveStatus(request: Request, env: Record<string, string
   const body: unknown = await request.json().catch(() => undefined);
   const { statusKey, status } = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   if (typeof statusKey !== "string" || !uuidPattern.test(statusKey) || !finalStatuses.includes(status as string)) return Response.json({ error: "Invalid request" }, { status: 400 });
-  try { await redis(store, ["SET", liveKey(statusIdFor(statusKey, secret)), status as string, "EX", String(TOKEN_TTL_SECONDS)]); }
+  try { await redis(store, ["SET", liveKey(statusIdFor(statusKey, secret)), status as string, "EX", String(IS_GEX ? TRIAL_TOKEN_TTL_SECONDS : TOKEN_TTL_SECONDS)]); }
   catch { return Response.json({ error: "Live QR status could not be saved" }, { status: 502 }); }
   return Response.json({ ok: true });
 }

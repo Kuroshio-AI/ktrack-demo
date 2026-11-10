@@ -9,7 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { amsWorkQueue, type WorkItem } from "@/lib/ams";
-import { IS_AMS, IS_FLS, IS_TRIAL } from "@/lib/client";
+import { IS_AMS, IS_FLS, IS_GEX, IS_TRIAL } from "@/lib/client";
+import { checkLot } from "@/lib/gex-check";
+import { customerTotals, gexWorkQueue } from "@/lib/gex";
 import { dateDiffDays } from "@/lib/domain";
 import { buildingStatus, type Light } from "@/lib/fls";
 import { calibrationStatus } from "@/lib/tally";
@@ -36,6 +38,26 @@ function AmsKpis() {
   return <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Kpi label="Tally sheets open" value={tallies.filter((inspection) => inspection.status === "Draft" || inspection.status === "Returned").length} detail="being measured" icon={ClipboardList} href="/inspections" /><Kpi label="Waiting for approval" value={tallies.filter((inspection) => inspection.status === "Submitted").length} detail="in Approvals" icon={FileClock} tone="amber" href="/approvals" /><Kpi label="Reports issued" value={tallies.filter((inspection) => inspection.status === "Issued").length} detail="numbered, with QR" icon={ShieldCheck} tone="green" href="/certificates" /><Kpi label="Calibrations due" value={calibration} detail="expired or within 30 days" icon={Gauge} tone="red" href="/equipment" /></div>;
 }
 
+// Where the lots stand: still being tested, waiting for a reviewer, certified, and flagged for retest.
+function GexKpis() {
+  const { state } = useApp();
+  const lots = state.inspections.filter((inspection) => inspection.lot);
+  const valid = state.records.filter((record) => lots.some((inspection) => inspection.assetId === record.id)).flatMap((record) => record.certificates).filter((certificate) => certificate.status === "Valid").length;
+  const outOfRange = lots.filter((inspection) => ["Draft", "Submitted", "Returned"].includes(inspection.status) && checkLot(inspection.lot!).failed.length).length;
+  return <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Kpi label="Lots in test" value={lots.filter((inspection) => inspection.status === "Draft" || inspection.status === "Returned").length} detail="results still to enter" icon={ClipboardList} href="/inspections" /><Kpi label="Waiting for sign-off" value={lots.filter((inspection) => inspection.status === "Submitted").length} detail="in Approvals" icon={FileClock} tone="amber" href="/approvals" /><Kpi label="Certificates issued" value={valid} detail="current, with QR" icon={ShieldCheck} tone="green" href="/certificates" /><Kpi label="Out of range" value={outOfRange} detail="open lots to retest" icon={ShieldAlert} tone="red" href="/inspections" /></div>;
+}
+
+// Each customer's lots, linking to that customer's certificates.
+function GexCustomers() {
+  const { state } = useApp();
+  const rows = customerTotals(state);
+  return <Card><CardHeader><div className="eyebrow">Customers</div><CardTitle>Deliveries by customer</CardTitle></CardHeader><CardContent className="overflow-x-auto">
+    {rows.length ? <table className="w-full min-w-[480px] text-sm"><thead><tr className="border-b border-line text-left text-xs font-bold uppercase tracking-[.1em] text-slate-500"><th className="py-2 pr-3">Customer</th><th className="px-3 py-2 text-right">Lots</th><th className="px-3 py-2 text-right">Issued</th><th className="px-3 py-2 text-right">Pending</th><th className="py-2 pl-3 text-right">Out of range</th></tr></thead>
+      <tbody>{rows.map((row) => <tr key={row.customer} className="border-b border-line last:border-0"><td className="py-2.5 pr-3"><Link href={`/certificates?customer=${encodeURIComponent(row.customer)}`} className="font-semibold text-navy hover:text-accent hover:underline">{row.customer}</Link></td><td className="px-3 py-2.5 text-right tabular-nums">{row.lots}</td><td className="px-3 py-2.5 text-right tabular-nums">{row.issued}</td><td className="px-3 py-2.5 text-right tabular-nums">{row.pending}</td><td className={`py-2.5 pl-3 text-right tabular-nums ${row.outOfRange ? "font-semibold text-danger" : ""}`}>{row.outOfRange}</td></tr>)}</tbody></table>
+    : <p className="text-sm text-slate-500">No lots recorded yet.</p>}
+  </CardContent></Card>;
+}
+
 const WORK: Record<WorkItem["kind"], { icon: typeof CalendarClock; tone: string; badge: "danger" | "warning" | "success" | "secondary" }> = {
   returned: { icon: Undo2, tone: "bg-[#fde8e8] text-danger", badge: "danger" },
   expired: { icon: Gauge, tone: "bg-[#fde8e8] text-danger", badge: "danger" },
@@ -47,16 +69,17 @@ const WORK: Record<WorkItem["kind"], { icon: typeof CalendarClock; tone: string;
 };
 
 // The AMS day, built from the sheets and instruments rather than dated alerts alone: each row opens where the work is done.
-function AmsWork() {
+// GEX passes its own lot queue; the item kinds are the same.
+function AmsWork({ queue: given }: { queue?: WorkItem[] }) {
   const { state } = useApp();
-  const queue = amsWorkQueue(state);
+  const queue = given ?? amsWorkQueue(state);
   const shown = queue.slice(0, 7);
   return <Card><CardHeader><div className="eyebrow">Today’s work</div><CardTitle>{queue.length ? "What needs doing" : "Nothing waiting"}</CardTitle></CardHeader><CardContent>
     {queue.length ? <div className="stagger flex flex-col gap-2">{shown.map((item) => { const { icon: Icon, tone, badge } = WORK[item.kind]; return <Link key={`${item.kind}-${item.id}`} href={item.href} className="flex items-center justify-between gap-4 rounded-lg border border-line bg-paper px-3 py-3 transition-[border-color,transform] duration-150 hover:-translate-y-px hover:border-accent active:translate-y-0">
       <div className="flex min-w-0 flex-1 items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-md ${tone}`}><Icon className="size-4" aria-hidden="true" /></span><div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold text-navy">{item.title}</div><div className="truncate text-xs text-slate-500">{item.detail}</div>{item.progress !== undefined && <div className="mt-1.5 h-1 max-w-56 overflow-hidden rounded-full bg-line" aria-hidden="true"><div className="h-full rounded-full bg-accent" style={{ width: `${item.progress * 100}%` }} /></div>}</div></div>
       <Badge variant={badge} className="shrink-0">{item.badge}</Badge></Link>; })}
       {queue.length > shown.length && <p className="px-1 text-xs text-slate-500">{queue.length - shown.length} more below these.</p>}</div>
-    : <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-line px-4 py-8 text-center"><p className="text-sm text-slate-500">Every tally sheet is submitted and every instrument is in calibration.</p><Button asChild size="sm" variant="outline"><Link href="/inspections">Go to Tally sheets <ArrowUpRight data-icon="inline-end" /></Link></Button></div>}
+    : <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-line px-4 py-8 text-center"><p className="text-sm text-slate-500">{IS_GEX ? "Every lot is submitted and nothing is waiting for sign-off." : "Every tally sheet is submitted and every instrument is in calibration."}</p><Button asChild size="sm" variant="outline"><Link href="/inspections">Go to {IS_GEX ? "Production lots" : "Tally sheets"} <ArrowUpRight data-icon="inline-end" /></Link></Button></div>}
   </CardContent></Card>;
 }
 
@@ -70,16 +93,17 @@ export function DashboardView() {
   // Not Ok items from an approved PPM checklist have no due date, so they sort first.
   const todayActions = open.filter((alert) => ["due7", "today", "overdue"].includes(alert.tier ?? "") || (alert.occurrenceKey.startsWith("defects:") && !alert.acknowledgedAt)).sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "")).slice(0, 6);
   return <div className="flex flex-col gap-6">
-    {state.records.length === 0 && !IS_AMS && <Card><CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+    {state.records.length === 0 && !IS_AMS && !IS_GEX && <Card><CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
       <div><h2 className="font-semibold text-navy">Your register is ready to set up.</h2><p className="mt-1 text-sm text-slate-500">{IS_FLS ? "Import your FLS DCD tracker to see every building's status and alerts." : "Import a spreadsheet to see deadlines and alerts. Templates and sample data are in Demo Controls."}</p></div>
       <div className="flex shrink-0 flex-wrap gap-2"><Button asChild><Link href="/import">Import spreadsheet</Link></Button><Button asChild variant="outline"><Link href="/demo-controls">Demo Controls</Link></Button></div>
     </CardContent></Card>}
-    {IS_FLS ? <FlsKpis /> : IS_AMS ? <AmsKpis /> : <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Kpi label="Due within 30 days" value={due30} detail="active obligations" icon={CalendarClock} tone="navy" /><Kpi label="Due within 7 days" value={due7} detail="today included" icon={FileClock} tone="amber" /><Kpi label="Overdue" value={overdue} detail="needs action" icon={ShieldAlert} tone="red" /><Kpi label="Awaiting review" value={review} detail="submitted inspections" icon={ClipboardCheck} tone="green" /></div>}
+    {IS_FLS ? <FlsKpis /> : IS_GEX ? <GexKpis /> : IS_AMS ? <AmsKpis /> : <div className="stagger grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Kpi label="Due within 30 days" value={due30} detail="active obligations" icon={CalendarClock} tone="navy" /><Kpi label="Due within 7 days" value={due7} detail="today included" icon={FileClock} tone="amber" /><Kpi label="Overdue" value={overdue} detail="needs action" icon={ShieldAlert} tone="red" /><Kpi label="Awaiting review" value={review} detail="submitted inspections" icon={ClipboardCheck} tone="green" /></div>}
     <div className="grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
-      {IS_AMS ? <AmsWork /> : <Card><CardHeader className="flex-row items-center justify-between"><div><div className="eyebrow">Today’s work</div><CardTitle>What should move next?</CardTitle></div><Button asChild variant="ghost" size="sm"><Link href="/alerts">Open alert queue <ArrowUpRight data-icon="inline-end" /></Link></Button></CardHeader><CardContent>{todayActions.length ? <div className="stagger flex flex-col gap-2">{todayActions.map((item) => { const days = dateDiffDays(item.dueDate ?? state.demoDate, state.demoDate); return <Link href={`/register?asset=${item.assetId ?? ""}`} key={item.id} className="flex items-center justify-between gap-4 rounded-lg border border-line bg-paper px-3 py-3 transition-[border-color,transform] duration-150 hover:-translate-y-px hover:border-accent active:translate-y-0"><div className="flex min-w-0 items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-md ${days < 0 ? "bg-[#fde8e8] text-danger" : "bg-[#fff2d7] text-[#8a5d00]"}`}><CircleAlert className="size-4" /></span><div className="min-w-0"><div className="truncate text-sm font-semibold text-navy">{item.assetRef} · {item.event}</div><div className="truncate text-xs text-slate-500">{item.owner} · {item.dueDate ? formatDate(item.dueDate) : `raised ${formatLocalDate(item.timestamp)}`}</div></div></div><div className="shrink-0 text-right"><Badge variant={days < 0 ? "danger" : "warning"}>{!item.dueDate ? "Follow up" : days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Today" : `${days}d`}</Badge></div></Link>; })}</div> : <div className="rounded-lg border border-dashed border-line px-4 py-8 text-center text-sm text-slate-500">No active work falls within seven days.</div>}</CardContent></Card>}
+      {IS_GEX ? <AmsWork queue={gexWorkQueue(state)} /> : IS_AMS ? <AmsWork /> : <Card><CardHeader className="flex-row items-center justify-between"><div><div className="eyebrow">Today’s work</div><CardTitle>What should move next?</CardTitle></div><Button asChild variant="ghost" size="sm"><Link href="/alerts">Open alert queue <ArrowUpRight data-icon="inline-end" /></Link></Button></CardHeader><CardContent>{todayActions.length ? <div className="stagger flex flex-col gap-2">{todayActions.map((item) => { const days = dateDiffDays(item.dueDate ?? state.demoDate, state.demoDate); return <Link href={`/register?asset=${item.assetId ?? ""}`} key={item.id} className="flex items-center justify-between gap-4 rounded-lg border border-line bg-paper px-3 py-3 transition-[border-color,transform] duration-150 hover:-translate-y-px hover:border-accent active:translate-y-0"><div className="flex min-w-0 items-center gap-3"><span className={`grid size-8 shrink-0 place-items-center rounded-md ${days < 0 ? "bg-[#fde8e8] text-danger" : "bg-[#fff2d7] text-[#8a5d00]"}`}><CircleAlert className="size-4" /></span><div className="min-w-0"><div className="truncate text-sm font-semibold text-navy">{item.assetRef} · {item.event}</div><div className="truncate text-xs text-slate-500">{item.owner} · {item.dueDate ? formatDate(item.dueDate) : `raised ${formatLocalDate(item.timestamp)}`}</div></div></div><div className="shrink-0 text-right"><Badge variant={days < 0 ? "danger" : "warning"}>{!item.dueDate ? "Follow up" : days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "Today" : `${days}d`}</Badge></div></Link>; })}</div> : <div className="rounded-lg border border-dashed border-line px-4 py-8 text-center text-sm text-slate-500">No active work falls within seven days.</div>}</CardContent></Card>}
       <Card><CardHeader><div className="eyebrow">Audit trail</div><CardTitle>Recent activity</CardTitle></CardHeader><CardContent>{state.activity.length ? <div className="flex flex-col gap-4">{state.activity.slice(0, 6).map((item) => <div key={item.id} className="flex gap-3"><span className="mt-1 size-2 shrink-0 rounded-full bg-accent" /><div className="min-w-0"><div className="text-sm font-semibold text-navy">{item.event}</div><div className="truncate text-xs text-slate-500">{item.detail}</div><div className="mt-1 text-[10px] font-bold uppercase tracking-[.1em] text-slate-400">{formatDateTime(item.timestamp)} · {item.actor}</div></div></div>)}</div> : <p className="text-sm text-slate-500">{IS_TRIAL ? "Nothing yet. Opening a job starts the trail." : "Import the fictional sample to start a local activity trail."}</p>}</CardContent></Card>
     </div>
+    {IS_GEX && <GexCustomers />}
     {IS_FLS && state.records.length > 0 && <DigestCard />}
-    {!IS_AMS && <div className="rounded-xl border border-[#b8cedc] bg-[#eef7fb] p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="eyebrow text-accent">Demo signal</div><p className="mt-1 text-sm leading-relaxed text-navy">The visible date is <strong>{formatDate(state.demoDate)}</strong>. Move it in Demo Controls to exercise date tiers; the operating system clock never changes.</p></div><Button asChild variant="outline" size="sm"><Link href="/demo-controls">Open controls <ArrowUpRight data-icon="inline-end" /></Link></Button></div></div>}
+    {!IS_AMS && !IS_GEX && <div className="rounded-xl border border-[#b8cedc] bg-[#eef7fb] p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><div className="eyebrow text-accent">Demo signal</div><p className="mt-1 text-sm leading-relaxed text-navy">The visible date is <strong>{formatDate(state.demoDate)}</strong>. Move it in Demo Controls to exercise date tiers; the operating system clock never changes.</p></div><Button asChild variant="outline" size="sm"><Link href="/demo-controls">Open controls <ArrowUpRight data-icon="inline-end" /></Link></Button></div></div>}
   </div>;
 }

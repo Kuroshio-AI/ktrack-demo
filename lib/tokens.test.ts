@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDemoToken, setLiveStatus, statusIdFor, TRIAL_TOKEN_TTL_SECONDS, verifyDemoToken, verifyLiveToken } from "./tokens";
+import { createDemoToken, isTokenSummary, setLiveStatus, statusIdFor, TRIAL_TOKEN_TTL_SECONDS, verifyDemoToken, verifyLiveToken } from "./tokens";
 
 const secret = "demo-only-secret-with-at-least-32-chars";
 const snapshot = { certificateNo: "CERT-1", assetRef: "HAR-001", assetType: "Harness", issuedDate: "2026-01-01", expiryDate: "2026-12-31", status: "Valid" as const, asOf: "2026-01-02T00:00:00.000Z" };
@@ -30,6 +30,21 @@ test("warranty tokens keep their kind and reject unknown kinds", () => {
   assert.equal(verified.ok && verified.snapshot.kind, "warranty");
   const forged = createDemoToken({ ...snapshot, kind: "other" } as unknown as typeof snapshot, secret, now);
   assert.equal(verifyDemoToken(forged, secret, now).ok, false);
+});
+
+test("a lot's key results ride in the token and bad summaries are refused", () => {
+  const now = Date.parse("2026-01-02T00:00:00Z");
+  const summary: [string, string][] = [["Customer", "Sample Customer"], ["Tensile", "212 MPa"]];
+  const verified = verifyDemoToken(createDemoToken({ ...snapshot, summary }, secret, now), secret, now);
+  assert.deepEqual(verified.ok && verified.snapshot.summary, summary);
+  // Signed with the real secret, so only the payload check can refuse these.
+  for (const bad of [Array.from({ length: 9 }, () => ["Key", "Value"]), [["Tensile", 212]], [["Tensile", "<b>212</b>"]]]) {
+    const forged = createDemoToken({ ...snapshot, summary: bad } as unknown as typeof snapshot, secret, now);
+    assert.deepEqual(verifyDemoToken(forged, secret, now), { ok: false, error: "Invalid token payload" });
+  }
+  assert.equal(isTokenSummary([]), true);
+  assert.equal(isTokenSummary(summary), true);
+  for (const bad of [undefined, "Tensile", [["Tensile"]], [["Tensile", "212", "MPa"]], [["", "212"]], [["Tensile", "  "]], [["Tensile", "x".repeat(49)]], [["Tensile", "212\n"]], [["Tensile", ">"]]]) assert.equal(isTokenSummary(bad), false);
 });
 
 // An in-memory stand-in for the Upstash REST API, which takes one Redis command as a JSON array.

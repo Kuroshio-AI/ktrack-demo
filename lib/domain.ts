@@ -25,6 +25,7 @@ import type {
 import { REGISTER_HEADERS } from "./types";
 import { FLS_DUE_LEAD_DAYS, IS_FLS } from "./client";
 import { checklistFrom, type ChecklistTemplate } from "./fls-checklists";
+import { checkLot, isAlloySpec, isGexLot } from "./gex-check";
 import { expiredEquipment, isConnectionSpec, isCriterion, isEquipment, isJoint, isTallyJob, tallyComplete } from "./tally";
 
 export const STORAGE_KEY = "keetrack-demo-state";
@@ -108,6 +109,7 @@ export function validateStoredState(value: unknown): value is AppState {
       && Array.isArray(inspection.checklist) && inspection.checklist.every((check) => Boolean(check && typeof check === "object" && isText((check as ChecklistItem).id) && isText((check as ChecklistItem).label) && ((check as ChecklistItem).section === undefined || isText((check as ChecklistItem).section)) && ["pass", "fail", "na", "pending"].includes((check as ChecklistItem).result)))
       && (inspection.title === undefined || isText(inspection.title))
       && (inspection.connection === undefined || isConnectionSpec(inspection.connection)) && (inspection.job === undefined || isTallyJob(inspection.job)) && (inspection.joints === undefined || (Array.isArray(inspection.joints) && inspection.joints.every(isJoint)))
+      && (inspection.lot === undefined || isGexLot(inspection.lot))
       && (!inspection.photos || (Array.isArray(inspection.photos) && inspection.photos.every((photo) => Boolean(photo && typeof photo === "object" && isText(photo.id) && isText(photo.name) && isText(photo.type) && isText(photo.dataUrl) && typeof photo.bytes === "number" && photo.bytes <= 200 * 1024))))
       && (inspection.signature === undefined || (typeof inspection.signature === "string" && inspection.signature.startsWith("data:image/png;base64,") && inspection.signature.length <= 90_000))
       && isText(inspection.notes) && isTimestamp(inspection.createdAt) && isTimestamp(inspection.updatedAt) && isOptionalDate(inspection.nextInspectionDate)
@@ -134,6 +136,7 @@ export function validateStoredState(value: unknown): value is AppState {
     && (candidate.connections === undefined || (Array.isArray(candidate.connections) && candidate.connections.every(isConnectionSpec)))
     && (candidate.equipment === undefined || (Array.isArray(candidate.equipment) && candidate.equipment.every(isEquipment)))
     && (candidate.criteria === undefined || (Array.isArray(candidate.criteria) && candidate.criteria.every(isCriterion)))
+    && (candidate.alloys === undefined || (Array.isArray(candidate.alloys) && candidate.alloys.every(isAlloySpec)))
     && (counters === undefined || (Boolean(counters) && typeof counters === "object" && !Array.isArray(counters) && Object.values(counters).every((count) => Number.isSafeInteger(count) && count >= 0)))
     && isDateString(candidate.demoDate)
     && isRole(candidate.role)
@@ -415,7 +418,7 @@ export function createInspection(state: AppState, assetId: string, actor = state
   return { state: { ...state, inspections: [inspection, ...state.inspections] }, inspection };
 }
 
-export function updateInspection(state: AppState, id: string, patch: Partial<Pick<Inspection, "checklist" | "job" | "joints" | "notes" | "photos" | "signature">>, timestamp = nowIso()): AppState {
+export function updateInspection(state: AppState, id: string, patch: Partial<Pick<Inspection, "checklist" | "job" | "joints" | "lot" | "notes" | "photos" | "signature">>, timestamp = nowIso()): AppState {
   if (patch.photos && (patch.photos.some((photo) => photo.bytes > 200 * 1024) || patch.photos.reduce((total, photo) => total + photo.bytes, 0) > 1024 * 1024)) throw new Error("Evidence exceeds the local photo limit.");
   return { ...state, inspections: state.inspections.map((item) => item.id === id && (item.status === "Draft" || item.status === "Returned") ? { ...item, ...patch, updatedAt: timestamp } : item) };
 }
@@ -425,8 +428,8 @@ export function deleteInspection(state: AppState, id: string): AppState {
   return { ...state, inspections: state.inspections.filter((item) => item.id !== id || item.status !== "Draft") };
 }
 
-// A tally sheet is ready once every joint is graded; a checklist once every item is answered.
-const isComplete = (inspection: Inspection) => inspection.joints ? tallyComplete(inspection) : inspection.checklist.length > 0 && inspection.checklist.every((item) => item.result !== "pending");
+// A lot is ready once every result and check is in; a tally sheet once every joint is graded; a checklist once every item is answered.
+const isComplete = (inspection: Inspection) => inspection.lot ? checkLot(inspection.lot).complete : inspection.joints ? tallyComplete(inspection) : inspection.checklist.length > 0 && inspection.checklist.every((item) => item.result !== "pending");
 
 export function submitInspection(state: AppState, id: string, timestamp = nowIso()): AppState {
   const inspection = state.inspections.find((item) => item.id === id);
@@ -438,7 +441,7 @@ export function submitInspection(state: AppState, id: string, timestamp = nowIso
   const next: AppState = { ...state, inspections: state.inspections.map((item) => item.id === id ? { ...item, ...(job && { job }), status: "Submitted", submittedAt: timestamp, updatedAt: timestamp } : item), alerts: state.alerts.map((alert) => alert.occurrenceKey.startsWith(`returned:${id}`) ? { ...alert, status: "resolved" as const } : alert) };
   const record = getRecord(state, inspection.assetId);
   if (!record) return next;
-  const what = inspection.joints ? "Tally sheet" : "Inspection";
+  const what = inspection.joints ? "Tally sheet" : inspection.lot ? "Lot" : "Inspection";
   const alert: Alert = { id: makeId("alert"), occurrenceKey: `review:${id}:${timestamp}`, type: "review", event: `${what} submitted for review`, assetId: record.id, assetRef: record.assetRef, owner: record.owner, timestamp, severity: "info", status: "open" };
   return { ...next, records: next.records.map((item) => item.id === record.id ? { ...item, activity: [activity(`${what} submitted`, "Awaiting review", state.role, timestamp), ...item.activity] } : item), alerts: [alert, ...next.alerts], activity: [activity(`${what} submitted`, `${record.assetRef} awaiting review`, state.role, timestamp), ...state.activity] };
 }
@@ -458,6 +461,8 @@ export function approveInspection(state: AppState, id: string, expiryDate: strin
   const inspection = state.inspections.find((item) => item.id === id);
   // A tally sheet issues its report with its rejects listed on it; a checklist needs every item passed or N/A.
   if (!inspection || !isComplete(inspection) || inspection.status !== "Submitted" || !isDateString(expiryDate) || expiryDate < state.demoDate || inspection.checklist.some((item) => item.result === "fail")) return state;
+  // A lot with an out-of-range result goes back for retest; it never issues.
+  if (inspection.lot !== undefined && !checkLot(inspection.lot).conforming) return state;
   if (inspection.certificateId) return state;
   const record = getRecord(state, inspection.assetId);
   if (!record) return state;

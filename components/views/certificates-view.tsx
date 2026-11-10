@@ -2,25 +2,31 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Check, Copy, ExternalLink, FileBadge, Printer, QrCode, ShieldCheck } from "lucide-react";
 import { useApp } from "@/components/app-provider";
 import { useOnline } from "@/components/offline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GexCertificateDialog } from "@/components/gex-certificate";
 import { TallyReportDialog } from "@/components/tally-report";
 import { Signature, WarrantyDocument, type WarrantyPrint } from "@/components/warranty-document";
-import { IS_AMS } from "@/lib/client";
+import { IS_AMS, IS_GEX } from "@/lib/client";
 import { effectiveCertificateStatus, revokeCertificate } from "@/lib/domain";
+import { gexSummary } from "@/lib/gex";
 import { qrFor, warrantyPrint } from "@/lib/qr";
 import { summarizeTally } from "@/lib/tally";
-import type { AssetRecord, Certificate } from "@/lib/types";
+import type { AppState, AssetRecord, Certificate } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
-const OFFLINE_QR = IS_AMS ? "QR codes come from our server, so this one needs the connection. The report still prints offline, and its QR is added when you're back online." : "QR codes come from our server, so this one needs the connection.";
+const OFFLINE_QR = IS_AMS || IS_GEX ? "QR codes come from our server, so this one needs the connection. The report still prints offline, and its QR is added when you're back online." : "QR codes come from our server, so this one needs the connection.";
 
-function snapshot(record: AssetRecord, certificate: Certificate, demoDate: string) {
-  return { certificateNo: certificate.number, assetRef: record.assetRef, assetType: record.assetType, issuedDate: certificate.issuedDate, expiryDate: certificate.expiryDate, status: effectiveCertificateStatus(certificate, demoDate) };
+// GEX adds a few key results from the lot, so a scan shows them; the token route checks they stay short.
+function snapshot(record: AssetRecord, certificate: Certificate, state: Pick<AppState, "demoDate" | "inspections">) {
+  const lot = state.inspections.find((item) => item.id === certificate.sourceInspectionId)?.lot;
+  return { certificateNo: certificate.number, assetRef: record.assetRef, assetType: record.assetType, issuedDate: certificate.issuedDate, expiryDate: certificate.expiryDate, status: effectiveCertificateStatus(certificate, state.demoDate), ...(lot && { summary: gexSummary(lot) }) };
 }
 type QrSnapshot = { image: string; url: string; key: string; createdAt: number };
 type PrintSnapshot = ReturnType<typeof snapshot> & { result: string; qr: string; site: string; serialNo?: string; inspector?: string; inspectorSignature?: string; inspectedAt?: string; approvedAt?: string; nextInspection?: string };
@@ -45,18 +51,21 @@ export function CertificatesView() {
   const qrDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (qrOpen) qrDialog.current?.showModal(); }, [qrOpen]);
   const canChange = state.role === "Admin" || state.role === "Reviewer";
-  const certificates = state.records.flatMap((record) => record.certificates.map((certificate) => ({ record, certificate })));
+  // ?customer= is the per-customer view the GEX dashboard links to; other builds ignore it.
+  const params = useSearchParams();
+  const customer = IS_GEX ? params.get("customer") : null;
+  const certificates = state.records.filter((record) => !customer || record.owner === customer).flatMap((record) => record.certificates.map((certificate) => ({ record, certificate })));
   const shown = qrOpen ? qr[qrOpen] : undefined;
   const opened = certificates.find(({ certificate }) => certificate.id === qrOpen);
 
   function currentQr(record: AssetRecord, certificate: Certificate) {
     const cached = qr[certificate.id];
-    return cached?.key === JSON.stringify(snapshot(record, certificate, state.demoDate)) && Date.now() - cached.createdAt < 24 * 60 * 60 * 1000 ? cached : undefined;
+    return cached?.key === JSON.stringify(snapshot(record, certificate, state)) && Date.now() - cached.createdAt < 24 * 60 * 60 * 1000 ? cached : undefined;
   }
 
   async function makeQr(record: AssetRecord, certificate: Certificate): Promise<QrSnapshot | undefined> {
     setError(""); setBusy(certificate.id);
-    const payload = snapshot(record, certificate, state.demoDate);
+    const payload = snapshot(record, certificate, state);
     // One key per certificate, saved with it, so a later revoke reaches every QR made for it.
     const statusKey = certificate.statusKey ?? crypto.randomUUID();
     if (!certificate.statusKey && !update((current) => ({ ...current, records: current.records.map((item) => item.id === record.id ? { ...item, certificates: item.certificates.map((cert) => cert.id === certificate.id ? { ...cert, statusKey: cert.statusKey ?? statusKey } : cert) } : item) }))) { setBusy(undefined); return; }
@@ -64,7 +73,7 @@ export function CertificatesView() {
       const { image, url } = await qrFor({ ...payload, statusKey });
       const latestRecord = currentState.current.records.find((item) => item.id === record.id);
       const latestCertificate = latestRecord?.certificates.find((item) => item.id === certificate.id);
-      if (!latestRecord || !latestCertificate || JSON.stringify(payload) !== JSON.stringify(snapshot(latestRecord, latestCertificate, currentState.current.demoDate))) throw new Error("Certificate changed while generating this QR. Please try again.");
+      if (!latestRecord || !latestCertificate || JSON.stringify(payload) !== JSON.stringify(snapshot(latestRecord, latestCertificate, currentState.current))) throw new Error("Certificate changed while generating this QR. Please try again.");
       const result = { image, url, key: JSON.stringify(payload), createdAt: Date.now() };
       setQr((current) => ({ ...current, [certificate.id]: result }));
       return result;
@@ -91,12 +100,12 @@ export function CertificatesView() {
 
   async function print(record: AssetRecord, certificate: Certificate) {
     const inspection = state.inspections.find((item) => item.id === certificate.sourceInspectionId);
-    const tally = inspection?.joints ? { inspectionId: inspection.id, recordId: record.id, certificateId: certificate.id } : undefined;
+    const tally = inspection?.joints || inspection?.lot ? { inspectionId: inspection.id, recordId: record.id, certificateId: certificate.id } : undefined;
     // A tally report still opens and prints offline. Its QR comes from our server, so it is added once the laptop reconnects.
     if (tally && !navigator.onLine) { setTallyPrint({ ...tally, qr: "" }); return; }
     const fresh = await makeQr(record, certificate);
     if (fresh && tally) { setTallyPrint({ ...tally, qr: fresh.image }); return; }
-    if (fresh) setPrinting({ kind: "certificate", ...snapshot(record, certificate, state.demoDate), result: certificate.result, qr: fresh.image, site: record.site, serialNo: record.serialNo, inspector: inspection?.inspector, inspectorSignature: inspection?.signature, inspectedAt: inspection?.submittedAt, approvedAt: inspection?.reviewedAt, nextInspection: inspection?.nextInspectionDate ?? record.inspectionDueDate });
+    if (fresh) setPrinting({ kind: "certificate", ...snapshot(record, certificate, state), result: certificate.result, qr: fresh.image, site: record.site, serialNo: record.serialNo, inspector: inspection?.inspector, inspectorSignature: inspection?.signature, inspectedAt: inspection?.submittedAt, approvedAt: inspection?.reviewedAt, nextInspection: inspection?.nextInspectionDate ?? record.inspectionDueDate });
   }
 
   // A report opened offline gets its QR as soon as the connection is back.
@@ -115,22 +124,23 @@ export function CertificatesView() {
   }
 
   return <div className="flex flex-col gap-5">
-    <Card><CardHeader><div className="eyebrow">{IS_AMS ? "Report register" : "Certificate register"}</div><CardTitle>{certificates.length} {IS_AMS ? "report" : "certificate"}{certificates.length === 1 ? "" : "s"}</CardTitle></CardHeader>
+    <Card><CardHeader><div className="eyebrow">{IS_AMS ? "Report register" : "Certificate register"}</div><CardTitle>{customer && `${customer} · `}{certificates.length} {IS_AMS ? "report" : "certificate"}{certificates.length === 1 ? "" : "s"}</CardTitle>{customer && <Link href="/certificates" className="focus-ring self-start text-sm font-semibold text-accent hover:underline">Clear</Link>}</CardHeader>
       <CardContent>{certificates.length ? <div className="grid gap-4 xl:grid-cols-2">{certificates.map(({ record, certificate }) => {
-        const details = snapshot(record, certificate, state.demoDate);
+        const details = snapshot(record, certificate, state);
         const tally = state.inspections.find((item) => item.id === certificate.sourceInspectionId && item.joints);
         const counts = tally?.job && summarizeTally(tally.connection!, tally.job, tally.joints!);
+        const lot = IS_GEX ? state.inspections.find((item) => item.id === certificate.sourceInspectionId)?.lot : undefined;
         return <div key={certificate.id} className="min-w-0 rounded-xl border border-line bg-white p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow">{record.assetRef} · {counts ? `${record.owner} · ` : ""}{record.site}</div><h3 className="mt-1 break-all text-lg font-bold text-navy">{certificate.number}</h3><p className="mt-1 text-sm text-slate-500">{record.assetType}{counts && ` · ${counts.total} pipes, ${counts.accepted} accepted, ${counts.downgraded.length} not accepted`}</p></div><Badge variant={details.status === "Valid" ? "success" : details.status === "Expired" ? "warning" : "danger"}>{details.status}</Badge></div>
+          <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="eyebrow">{record.assetRef} · {IS_GEX ? record.owner : `${counts ? `${record.owner} · ` : ""}${record.site}`}</div><h3 className="mt-1 break-all text-lg font-bold text-navy">{certificate.number}</h3><p className="mt-1 text-sm text-slate-500">{record.assetType}{counts && ` · ${counts.total} pipes, ${counts.accepted} accepted, ${counts.downgraded.length} not accepted`}</p>{lot && <p className="mt-0.5 text-xs text-slate-500">PO {lot.customerPo} · {lot.deliveryNote}</p>}</div><Badge variant={details.status === "Valid" ? "success" : details.status === "Expired" ? "warning" : "danger"}>{details.status}</Badge></div>
           <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-paper p-3 text-sm"><div><div className="eyebrow">Issued</div><div className="mt-1 font-semibold text-navy">{formatDate(certificate.issuedDate)}</div></div><div><div className="eyebrow">Expires</div><div className="mt-1 font-semibold text-navy">{formatDate(certificate.expiryDate)}</div></div></div>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void print(record, certificate)}><Printer />Print</Button>
-            {!IS_AMS && <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void printWarranty(record)}><FileBadge />{busy === `warranty:${record.id}` ? "Preparing…" : "Warranty"}</Button>}
+            {!IS_AMS && !IS_GEX && <Button variant="outline" size="sm" disabled={Boolean(busy)} onClick={() => void printWarranty(record)}><FileBadge />{busy === `warranty:${record.id}` ? "Preparing…" : "Warranty"}</Button>}
             <Button variant="secondary" size="sm" disabled={Boolean(busy)} onClick={() => void showQr(record, certificate)}><QrCode />{busy === certificate.id ? "Generating…" : currentQr(record, certificate) ? "Show QR" : "Create QR"}</Button>
             {canChange && (details.status === "Valid" || details.status === "Expired") && <Button variant="ghost" size="sm" className="text-danger" disabled={Boolean(busy)} onClick={() => revoke(record, certificate)}>Revoke</Button>}
           </div>
         </div>;
-      })}</div> : <div className="rounded-lg border border-dashed border-line px-4 py-14 text-center"><ShieldCheck className="mx-auto size-9 text-[#b8cedc]" /><p className="mt-3 text-sm text-slate-500">{IS_AMS ? "Approve a submitted tally sheet to issue its report." : "Import a supplied certificate or approve a passed inspection to begin."}</p></div>}
+      })}</div> : <div className="rounded-lg border border-dashed border-line px-4 py-14 text-center"><ShieldCheck className="mx-auto size-9 text-[#b8cedc]" /><p className="mt-3 text-sm text-slate-500">{customer ? `No certificates for ${customer} yet.` : IS_GEX ? "Approve a submitted lot to issue its quality certificate." : IS_AMS ? "Approve a submitted tally sheet to issue its report." : "Import a supplied certificate or approve a passed inspection to begin."}</p></div>}
         {error && <p className="mt-4 rounded-lg bg-[#fff3f3] p-3 text-sm text-danger" role="alert">{error}</p>}
       </CardContent>
     </Card>
@@ -138,7 +148,7 @@ export function CertificatesView() {
       <div className="eyebrow">{opened.record.assetRef} · Scan to verify</div>
       <h2 id="qr-title" className="mt-1 break-all text-lg font-bold text-navy">{opened.certificate.number}</h2>
       <img src={shown.image} alt={`QR code for ${opened.certificate.number}`} className="mx-auto mt-3 size-64" />
-      <p className="text-xs leading-relaxed text-slate-500">Status now: {effectiveCertificateStatus(opened.certificate, state.demoDate)}. If this {IS_AMS ? "report" : "certificate"} is revoked, the QR shows it, even on a printed copy. The link works for 24 hours.</p>
+      <p className="text-xs leading-relaxed text-slate-500">Status now: {effectiveCertificateStatus(opened.certificate, state.demoDate)}. {IS_GEX ? "If this certificate is revoked or replaced, the QR shows it, even on a printed copy." : `If this ${IS_AMS ? "report" : "certificate"} is revoked, the QR shows it, even on a printed copy. The link works for 24 hours.`}</p>
       {error && <p className="mt-3 rounded-lg bg-[#fff3f3] p-2 text-xs text-danger" role="alert">{error}</p>}
       <div className="mt-5 flex flex-wrap justify-center gap-2">
         <Button asChild size="sm"><a href={shown.url} target="_blank" rel="noreferrer"><ExternalLink />Open verification</a></Button>
@@ -146,7 +156,7 @@ export function CertificatesView() {
         <Button variant="ghost" size="sm" onClick={() => qrDialog.current?.close()}>Close</Button>
       </div>
     </dialog>, document.body)}
-    {tallyPrint && <TallyReportDialog inspectionId={tallyPrint.inspectionId} qr={tallyPrint.qr} qrPending={!tallyPrint.qr} onClose={() => setTallyPrint(undefined)} />}
+    {tallyPrint && (IS_GEX ? <GexCertificateDialog key={tallyPrint.certificateId} inspectionId={tallyPrint.inspectionId} qr={tallyPrint.qr} qrPending={!tallyPrint.qr} onClose={() => setTallyPrint(undefined)} /> : <TallyReportDialog key={tallyPrint.certificateId} inspectionId={tallyPrint.inspectionId} qr={tallyPrint.qr} qrPending={!tallyPrint.qr} onClose={() => setTallyPrint(undefined)} />)}
     {printing && createPortal(<dialog ref={dialog} aria-label={printing.kind === "warranty" ? "Warranty print preview" : "Certificate print preview"} onClose={() => setPrinting(undefined)} className="certificate-print-area animate-rise fixed inset-0 m-auto max-h-[95vh] w-[min(95vw,850px)] overflow-auto bg-white p-5 backdrop:bg-black/50 sm:p-10">
       <div className="print-hidden mb-5 flex justify-end gap-2"><Button onClick={() => window.print()}>Print / Save PDF</Button><Button variant="outline" onClick={() => dialog.current?.close()}>Close</Button></div>
       {printing.kind === "warranty" ? <WarrantyDocument {...printing} /> : <div className="mx-auto border-[8px] border-[#0b3151] p-1"><div className="border border-[#b8cedc] p-5 sm:p-10">

@@ -1,7 +1,7 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { ShieldAlert, ShieldCheck, ShieldMinus, ShieldX } from "lucide-react";
 import { VerifyReport } from "@/components/verify-report";
-import { AMS_NAME, IS_AMS, IS_TRIAL } from "@/lib/client";
+import { AMS_NAME, GEX_NAME, IS_AMS, IS_GEX, IS_TRIAL } from "@/lib/client";
 import { effectiveCertificateStatus, todayString } from "@/lib/domain";
 import { verifyLiveToken } from "@/lib/tokens";
 import type { AssetRecord, Certificate, CertificateStatus, Inspection } from "@/lib/types";
@@ -63,7 +63,7 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
   return <main className="min-h-screen bg-[#f3f7f9] px-4 py-10 sm:py-14">
     <div className="animate-rise mx-auto max-w-md overflow-hidden rounded-2xl border border-[#d4e1e8] bg-white shadow-panel">
       <div className={`px-6 pb-8 pt-7 text-center ${tone.band}`}>
-        <div className="text-[11px] font-bold uppercase tracking-[.18em] text-[#1684ab]">{IS_AMS ? AMS_NAME : "Kee Safety"} · KTrack</div>
+        <div className="text-[11px] font-bold uppercase tracking-[.18em] text-[#1684ab]">{IS_GEX ? GEX_NAME : IS_AMS ? AMS_NAME : "Kee Safety"} · KTrack</div>
         <span className={`pop-in mx-auto mt-7 grid size-24 place-items-center rounded-full text-white shadow-lg ring-8 ring-white ${tone.badge}`}><Icon className="size-12" aria-hidden="true" /></span>
         <h1 className="mt-5 text-3xl font-bold tracking-[-.03em] text-[#0b3151]">{tone.title}</h1>
         <p className="mt-2 text-sm text-slate-600">{tone.detail}</p>
@@ -72,10 +72,15 @@ export default async function VerifyPage({ searchParams }: { searchParams: Promi
         <div className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">{warranty ? "Warranty number" : IS_AMS ? "Report number" : "Certificate number"}</div>
         <div className="mt-1 break-all font-mono text-xl font-bold text-[#0b3151]">{result.snapshot.certificateNo}</div>
         <dl className="mt-5 grid grid-cols-2 gap-4 border-t border-[#e1e9ee] pt-5">
-          <div className="col-span-2"><dt className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">{IS_AMS ? "Job" : "Asset"}</dt><dd className="mt-1 font-semibold text-[#0b3151]">{result.snapshot.assetRef} · {result.snapshot.assetType}</dd></div>
+          <div className="col-span-2"><dt className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">{IS_GEX ? "Lot" : IS_AMS ? "Job" : "Asset"}</dt><dd className="mt-1 font-semibold text-[#0b3151]">{result.snapshot.assetRef} · {result.snapshot.assetType}</dd></div>
           <div><dt className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">{warranty ? "Warranty date" : "Issued"}</dt><dd className="mt-1 font-semibold text-[#0b3151]">{formatDate(result.snapshot.issuedDate)}</dd></div>
           <div><dt className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">{warranty || IS_AMS ? "Valid until" : "Expires"}</dt><dd className="mt-1 font-semibold text-[#0b3151]">{formatDate(result.snapshot.expiryDate)}</dd></div>
         </dl>
+        {/* Only GEX tokens carry a summary, so this needs no flag. */}
+        {result.snapshot.summary?.length ? <section aria-labelledby="key-results" className="mt-5 border-t border-[#e1e9ee] pt-5">
+          <h2 id="key-results" className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">Key results</h2>
+          <dl className="mt-3 grid grid-cols-2 gap-4">{result.snapshot.summary.map(([label, value], index) => <div key={index}><dt className="text-xs font-bold uppercase tracking-[.1em] text-slate-500">{label}</dt><dd className="mt-1 break-words font-semibold text-[#0b3151]">{value}</dd></div>)}</dl>
+        </section> : null}
         {/* Rendered on the server, so the time is stated in UTC rather than guessing the viewer's zone. */}
         <p className="mt-6 border-t border-[#e1e9ee] pt-4 text-xs leading-relaxed text-slate-500">{IS_TRIAL ? "Inspection report" : `Demo ${warranty ? "warranty" : IS_AMS ? "report" : "certificate"}`} · {result.checkedAt ? "live status checked" : "status as of"} {formatDate(checked.slice(0, 10))}, {checked.slice(11, 16)} UTC.{!result.checkedAt && " This is a signed snapshot, not live certification."}</p>
       </div>}

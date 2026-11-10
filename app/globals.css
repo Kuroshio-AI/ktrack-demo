@@ -47,7 +47,12 @@ a { color: inherit; text-decoration: none; }
   .certificate-print-area[open] { position: static; width: 100%; max-width: none; max-height: none; margin: 0; padding: 0; overflow: visible; border: 0; }
   .certificate-print-area::backdrop { display: none; }
   @page { size: A4; margin: 12mm; }
+  .cert-sheet { break-inside: avoid; }
+  .cert-stamp { animation: none; transform: rotate(-9deg); }
 }
+/* GEX certificate: capital labels, and tints, stamp and overprint print as shown rather than being dropped as background. */
+.cert-caps { text-transform: uppercase; letter-spacing: .07em; }
+.cert-sheet { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 
 /* AMS: the client's paper forms band their headings in peach and their limits row in green; the screens and reports keep
    those colours so an inspector finds the same thing in the same place. Readings use Plex Mono so the inches line up. */

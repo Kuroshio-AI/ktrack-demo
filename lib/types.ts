@@ -191,6 +191,21 @@ export type TallyJob = {
   photos?: TallyPhoto[];
 };
 
+// GEX only: one alloy-temper's limits. Limit.column is a reading key from GEX_READINGS (lib/gex-check.ts). Sample rows are invented.
+export type AlloySpec = { id: string; alloy: string; temper: string; limits: Limit[]; sample?: boolean };
+export type GexFinish = "Mill" | "Powder coated" | "Anodised";
+export type GexCheck = "dimensions" | "surface" | "adhesion" | "seal";
+// GEX only: a production lot / delivery. spec is a copy, like Inspection.connection, so editing the table never re-checks an issued certificate.
+export type GexLot = {
+  customer: string; orderNo: string; customerPo: string; deliveryNote: string;
+  profile: string; finish: GexFinish; colour?: string; lengthMm: number; quantity: number; castNo: string;
+  spec: AlloySpec;
+  // Keyed by GEX_READINGS key; a missing key is not yet measured.
+  readings: Record<string, number>;
+  // true = OK, false = not OK, missing = not answered.
+  checks: Partial<Record<GexCheck, boolean>>;
+};
+
 export type Inspection = {
   id: string;
   assetId: string;
@@ -202,6 +217,8 @@ export type Inspection = {
   connection?: ConnectionSpec;
   job?: TallyJob;
   joints?: Joint[];
+  // GEX only.
+  lot?: GexLot;
   photos?: InspectionPhoto[];
   // PNG drawn on the phone hand-off page; shown on the certificate's "Inspected by" line.
   signature?: string;
@@ -260,6 +277,10 @@ export type AppState = {
   criteria?: DamageCriterion[];
   // AMS only: the inspection instruments and their calibration due dates.
   equipment?: Equipment[];
+  // GEX only: the editable alloy-temper limits table new lots are checked against.
+  alloys?: AlloySpec[];
+  // GEX only: which version of the sample lots this workspace started from.
+  gexSeed?: number;
 };
 
 export type ImportError = {

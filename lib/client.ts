@@ -4,6 +4,9 @@ export const IS_FLS = process.env.NEXT_PUBLIC_CLIENT === "fls";
 // "ams" builds the drill string inspection demo for Al Mansoori Inspection Services: tally sheets checked against a dimension table.
 export const IS_AMS = process.env.NEXT_PUBLIC_CLIENT === "ams";
 export const AMS_NAME = "Al Mansoori Inspection Services";
+// "gex" builds the Gulf Extrusion demo on the AMS base; its sample data is invented.
+export const IS_GEX = process.env.NEXT_PUBLIC_CLIENT === "gex";
+export const GEX_NAME = "Gulf Extrusion";
 
 // The FLS sheet's Due Date is always 15 days before the certificate expires (=E-15).
 export const FLS_DUE_LEAD_DAYS = 15;

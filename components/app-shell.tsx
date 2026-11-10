@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { motion, MotionConfig } from "motion/react";
 import { RollingNumber } from "@/components/interior/value-flash";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, Building2, CalendarCheck, ChevronRight, ClipboardList, FileBadge, FileCheck2, Gauge, Import, Leaf, ListChecks, Menu, Ruler, Settings2, ShieldCheck, UserCog, X } from "lucide-react";
+import { Activity, AlertTriangle, BarChart3, BellRing, BookOpenCheck, Building2, CalendarCheck, ChevronRight, ClipboardList, Factory, FileBadge, FileCheck2, FlaskConical, Gauge, Import, Leaf, ListChecks, Menu, Ruler, Settings2, ShieldCheck, UserCog, X } from "lucide-react";
 import { AppProvider, useApp } from "@/components/app-provider";
 import { CustomerPortal } from "@/components/customer-portal";
 import { InstallButton, OfflineBanner, SyncConflicts, useServiceWorker } from "@/components/offline";
@@ -29,7 +29,9 @@ import { CriteriaView } from "@/components/views/criteria-view";
 import { EquipmentView } from "@/components/views/equipment-view";
 import { AccountsView } from "@/components/views/accounts-view";
 import { TallyView } from "@/components/views/tally-view";
-import { AMS_NAME, IS_AMS, IS_FLS, IS_TRIAL } from "@/lib/client";
+import { LotView } from "@/components/views/lot-view";
+import { AlloysView } from "@/components/views/alloys-view";
+import { AMS_NAME, GEX_NAME, IS_AMS, IS_FLS, IS_GEX, IS_TRIAL } from "@/lib/client";
 import type { Role } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -41,6 +43,7 @@ const nav = [
   { id: "certificates", label: "Certificates", icon: ShieldCheck },
   { id: "connections", label: "Connections", icon: Ruler },
   { id: "criteria", label: "Damage criteria", icon: ListChecks },
+  { id: "alloys", label: "Alloy limits", icon: FlaskConical },
   { id: "equipment", label: "Equipment", icon: Gauge },
   { id: "warranties", label: "Warranties", icon: FileBadge },
   { id: "sustainability", label: "Sustainability", icon: Leaf },
@@ -57,9 +60,13 @@ const FLS_LABELS: Record<string, { label: string; icon?: typeof Building2 }> = {
 // The trial drops the sandbox: Demo Controls would reset or restore one laptop behind the server's back, and savings don't sync.
 const AMS_VIEWS: string[] = ["dashboard", "inspections", "approvals", "certificates", "connections", "criteria", "equipment", "alerts", ...(IS_TRIAL ? ["accounts"] : ["sustainability", "demo-controls"])];
 const AMS_LABELS: Record<string, { label: string; icon?: typeof Building2 }> = { inspections: { label: "Tally sheets", icon: ClipboardList }, certificates: { label: "Reports", icon: FileCheck2 } };
+// The GEX build: production lots checked against the alloy limits, approved into quality certificates.
+const GEX_VIEWS: string[] = ["dashboard", "inspections", "approvals", "certificates", "alloys", "alerts", "demo-controls"];
+const GEX_LABELS: Record<string, { label: string; icon?: typeof Building2 }> = { inspections: { label: "Production lots", icon: Factory }, certificates: { label: "Certificates" } };
 const shownNav = IS_FLS ? nav.filter(({ id }) => FLS_VIEWS.includes(id)).map((item) => ({ ...item, ...FLS_LABELS[item.id] }))
+  : IS_GEX ? nav.filter(({ id }) => GEX_VIEWS.includes(id)).map((item) => ({ ...item, ...GEX_LABELS[item.id] }))
   : IS_AMS ? nav.filter(({ id }) => AMS_VIEWS.includes(id)).map((item) => ({ ...item, ...AMS_LABELS[item.id] }))
-  : nav.filter(({ id }) => id !== "connections" && id !== "criteria" && id !== "equipment" && id !== "accounts");
+  : nav.filter(({ id }) => id !== "connections" && id !== "criteria" && id !== "equipment" && id !== "accounts" && id !== "alloys");
 
 const titles: Record<string, { eyebrow: string; title: string; description: string }> = {
   import: { eyebrow: "Data intake", title: "Import", description: "Validate a register or sustainability savings spreadsheet and review the rows before importing." },
@@ -98,15 +105,27 @@ const amsTitles: typeof titles = {
   "demo-controls": { eyebrow: "Scenario lab", title: "Demo Controls", description: "Load the client's dimension table, move the demo date, back up this workspace or reset it to the sample jobs." },
 };
 
+const gexTitles: typeof titles = {
+  dashboard: { eyebrow: "Quality overview", title: "Dashboard", description: "Lots in test, certificates waiting for sign-off, out-of-range results and each customer's deliveries." },
+  inspections: { eyebrow: "Production", title: "Production lots", description: "Record a lot's order details and test results. Every result is checked against the alloy-temper limits as you type." },
+  approvals: { eyebrow: "Quality sign-off", title: "Approvals", description: "Check a submitted lot and approve it into a numbered quality certificate, or return it for retest." },
+  certificates: { eyebrow: "Issued certificates", title: "Certificates", description: "Every quality certificate with its QR. Customers scan it to confirm the certificate is genuine and current." },
+  alloys: { eyebrow: "Acceptance limits", title: "Alloy limits", description: "Composition, mechanical and finish limits for each alloy-temper. These are sample values; replace them with your own." },
+  alerts: { eyebrow: "Attention queue", title: "Alerts", description: "Lots waiting for sign-off or returned for retest, and certificates revoked or replaced." },
+  "demo-controls": { eyebrow: "Scenario lab", title: "Demo Controls", description: "Move the demo date, back up this workspace or reset it to the sample lots." },
+};
+
 function View({ view }: { view: string }): ReactNode {
   if (IS_FLS && !FLS_VIEWS.includes(view)) return <DashboardView />;
+  if (IS_GEX && !GEX_VIEWS.includes(view)) return <DashboardView />;
   if (IS_AMS && !AMS_VIEWS.includes(view)) return <DashboardView />;
   switch (view) {
     case "dashboard": return <DashboardView />;
     case "register": return IS_FLS ? <BuildingsView /> : <RegisterView />;
-    case "inspections": return IS_AMS ? <TallyView /> : <InspectionsView />;
+    case "inspections": return IS_GEX ? <LotView /> : IS_AMS ? <TallyView /> : <InspectionsView />;
     case "connections": return IS_AMS ? <ConnectionsView /> : <DashboardView />;
     case "criteria": return IS_AMS ? <CriteriaView /> : <DashboardView />;
+    case "alloys": return IS_GEX ? <AlloysView /> : <DashboardView />;
     case "equipment": return IS_AMS ? <EquipmentView /> : <DashboardView />;
     case "approvals": return <ApprovalsView />;
     case "certificates": return <CertificatesView />;
@@ -147,18 +166,18 @@ function AppFrame({ initialView }: { initialView: string }) {
     document.addEventListener("keydown", onKey); firstNavLink.current?.focus();
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = previousOverflow; menuButton.current?.focus(); };
   }, [mobileOpen, isMobile]);
-  const meta = (IS_FLS ? flsTitles : IS_AMS ? amsTitles : titles)[view] ?? titles.dashboard;
+  const meta = (IS_FLS ? flsTitles : IS_GEX ? gexTitles : IS_AMS ? amsTitles : titles)[view] ?? titles.dashboard;
   const openAlerts = state.alerts.filter((alert) => alert.status === "open").length;
   // The trial waits for the account before drawing anything, so a customer never sees the operations screens.
   if (IS_TRIAL && !hydrated) return <p role="status" className="grid min-h-screen place-items-center bg-paper text-sm text-slate-500">Opening KTrack…</p>;
   if (user?.role === "Customer") return <CustomerPortal />;
 
   return <div className="app-grid min-h-screen lg:flex">
-    <aside ref={sidebar} aria-hidden={isMobile && !mobileOpen} inert={isMobile && !mobileOpen ? true : undefined} className={`fixed inset-y-0 left-0 z-40 flex w-[268px] flex-col border-r border-[#17496d] bg-[#0b3151] px-4 py-5 text-white transition-transform lg:static lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+    <aside ref={sidebar} aria-hidden={isMobile && !mobileOpen} inert={isMobile && !mobileOpen ? true : undefined} className={`fixed inset-y-0 left-0 z-40 flex w-[268px] flex-col border-r border-[#17496d] bg-[#0b3151] px-4 py-5 text-white transition-transform lg:sticky lg:top-0 lg:h-screen lg:overflow-y-auto lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="flex items-center justify-between px-2">
         <Link href="/dashboard" onClick={() => setMobileOpen(false)} className="flex items-center gap-3 focus-ring rounded-md">
           <span className="grid size-10 place-items-center rounded-xl bg-white text-[#0b3151] shadow-lg"><span className="text-xl font-black">K</span></span>
-          <span><span className="block text-[19px] font-bold tracking-[-.03em]">KTrack</span><span className="block text-[10px] font-bold uppercase tracking-[.15em] text-[#a8c7dd]">{IS_FLS ? "DXB FLS compliance" : IS_AMS ? AMS_NAME : "Kee Safety operations"}</span></span>
+          <span><span className="block text-[19px] font-bold tracking-[-.03em]">KTrack</span><span className="block text-[10px] font-bold uppercase tracking-[.15em] text-[#a8c7dd]">{IS_FLS ? "DXB FLS compliance" : IS_GEX ? GEX_NAME : IS_AMS ? AMS_NAME : "Kee Safety operations"}</span></span>
         </Link>
         <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 lg:hidden" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X /></Button>
       </div>
@@ -171,7 +190,7 @@ function AppFrame({ initialView }: { initialView: string }) {
         <Link href="/demo-controls" onClick={() => setMobileOpen(false)} tabIndex={isMobile && !mobileOpen ? -1 : 0} className={`focus-ring group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${view === "demo-controls" ? "text-[#0b3151]" : "text-[#d1e3ed] hover:bg-white/10 hover:text-white"}`}>{view === "demo-controls" && <NavPill />}<Settings2 className="relative size-[17px] transition-transform group-hover:rotate-45" /><span className="relative">Demo Controls</span></Link></>}
       </nav>
       <InstallButton />
-      <div className="border-t border-[#2a5774] px-2 pt-4 text-[11px] leading-relaxed text-[#9cbed2]"><div className="flex items-center gap-2"><Activity className="size-3" />Manual notifications only</div><div className="mt-1">v1.0 · {IS_TRIAL ? "trial workspace" : IS_FLS || IS_AMS ? "demo workspace" : "fictional demo data"}</div></div>
+      <div className="border-t border-[#2a5774] px-2 pt-4 text-[11px] leading-relaxed text-[#9cbed2]"><div className="flex items-center gap-2"><Activity className="size-3" />Manual notifications only</div><div className="mt-1">v1.0 · {IS_TRIAL ? "trial workspace" : IS_FLS || IS_AMS || IS_GEX ? "demo workspace" : "fictional demo data"}</div></div>
     </aside>
     {mobileOpen && <button className="fixed inset-0 z-30 bg-[#071d30]/50 lg:hidden" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <main inert={isMobile && mobileOpen ? true : undefined} className="min-w-0 flex-1">

@@ -1,14 +1,14 @@
 import type { MetadataRoute } from "next";
-import { AMS_NAME, IS_AMS, IS_FLS } from "@/lib/client";
+import { AMS_NAME, GEX_NAME, IS_AMS, IS_FLS, IS_GEX } from "@/lib/client";
 
 // Makes KTrack installable from Chrome or Edge: it opens in its own window from the Start menu or the Dock, and the
 // service worker (public/sw.js) lets it open and work with no internet.
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: IS_AMS ? `KTrack · ${AMS_NAME}` : IS_FLS ? "KTrack · FLS Certificate Tracker" : "KTrack · Operations Console",
+    name: IS_GEX ? `KTrack · ${GEX_NAME}` : IS_AMS ? `KTrack · ${AMS_NAME}` : IS_FLS ? "KTrack · FLS Certificate Tracker" : "KTrack · Operations Console",
     short_name: "KTrack",
-    description: IS_AMS ? "Drill pipe tally sheets checked against the dimension table, issued as inspection reports. Works offline." : "KTrack (Kuroshio Track). Works offline.",
+    description: IS_GEX ? "KTrack (Kuroshio Track): production lots checked against alloy limits and issued as quality certificates with a QR." : IS_AMS ? "Drill pipe tally sheets checked against the dimension table, issued as inspection reports. Works offline." : "KTrack (Kuroshio Track). Works offline.",
     start_url: "/dashboard",
     scope: "/",
     display: "standalone",
