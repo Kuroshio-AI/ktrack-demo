@@ -66,14 +66,16 @@ function ReadingRow({ lot, row, disabled, onSave }: { lot: GexLot; row: LotRow; 
   const valid = typed === undefined || Number.isFinite(typed);
   const ok = typed === undefined || !valid ? undefined : checkLot({ ...lot, readings: { [row.key]: typed } }).rows.find((item) => item.key === row.key)?.ok;
   const below = ok === false && row.min !== undefined && typed! < row.min;
+  const flag = ok === false ? (below ? "Below min" : "Above max") : !valid ? "Not a number" : undefined;
+  // The unit sits inside the box and the verdict right after it, so the whole row reads in one line at any pane width.
   return <tr className="border-t border-line">
     <td className="px-3 py-1.5 font-semibold text-navy">{row.label}</td>
-    <td className="px-3 py-1.5 text-slate-500">{row.unit}</td>
-    <td className="form-limits tally-mono px-3 py-1.5 text-right">{limitText(row)}</td>
-    <td className="px-2 py-1"><Input aria-label={`${row.label} result`} aria-invalid={ok === false || !valid} inputMode="decimal" value={text} readOnly={disabled} onChange={(event) => setText(event.target.value)}
+    <td className="form-limits tally-mono whitespace-nowrap px-3 py-1.5 text-right">{limitText(row)}</td>
+    <td className="px-2 py-1"><div className="relative"><Input data-result aria-label={`${row.label} result, ${row.unit}`} aria-invalid={ok === false || !valid} aria-describedby={flag ? `${row.key}-flag` : undefined} inputMode="decimal" value={text} readOnly={disabled} onChange={(event) => setText(event.target.value)} onFocus={(event) => event.target.select()}
+      onKeyDown={(event) => { if (event.key !== "Enter") return; event.preventDefault(); const all = [...document.querySelectorAll<HTMLInputElement>("input[data-result]:not([readonly])")]; all[all.indexOf(event.currentTarget) + 1]?.focus() ?? event.currentTarget.blur(); }}
       onBlur={() => { if (text.trim() === shown) return; if (!valid) return setText(shown); onSave(row.key, typed); }}
-      className={`tally-mono h-8 w-[110px] text-right read-only:cursor-default ${ok === false || !valid ? "border-danger font-semibold text-danger" : "text-navy"}`} /></td>
-    <td className="px-3 py-1.5">{ok === false ? <Badge variant="danger" className="whitespace-nowrap">{below ? "Below min" : "Above max"}</Badge> : ok ? <Check className="size-4 text-success" strokeWidth={3} aria-label="In range" /> : !valid ? <span className="text-xs text-danger">Not a number</span> : null}</td>
+      className={`tally-mono h-9 pr-12 text-right read-only:cursor-default ${ok === false || !valid ? "border-danger font-semibold text-danger" : "text-navy"}`} /><span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-xs text-slate-400">{row.unit}</span></div></td>
+    <td className="w-8 py-1.5 pr-3">{flag ? <span id={`${row.key}-flag`} title={flag} className="grid size-6 place-items-center rounded-full bg-[#fde8e8] text-danger"><AlertTriangle className="size-3.5" aria-label={flag} /></span> : ok ? <Check className="size-4 text-success" strokeWidth={3} aria-label="In range" /> : null}</td>
   </tr>;
 }
 
@@ -125,7 +127,7 @@ export function LotView() {
   const entered = check ? check.rows.filter((row) => row.value !== undefined).length : 0;
   const answered = check ? check.checks.filter((item) => item.value !== undefined).length : 0;
 
-  return <div ref={panes} className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[400px_minmax(0,1fr)]">
+  return <div ref={panes} className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
     <Card className={PANE}><CardHeader className="flex-row items-start justify-between gap-3"><div><div className="eyebrow">Production lots</div><CardTitle>{lotCount} lot{lotCount === 1 ? "" : "s"}</CardTitle></div>{canWork && !creating && <Button className="press" onClick={() => setCreating(true)}><Plus data-icon="inline-start" />New lot</Button>}</CardHeader>
       <CardContent>
         {lots.length ? <div className="stagger flex flex-col gap-1">{lots.map((inspection) => {
@@ -134,9 +136,10 @@ export function LotView() {
           const failed = checkLot(inspection.lot!).failed.length;
           const superseded = lotRecord?.certificates.find((item) => item.id === inspection.certificateId)?.status === "Superseded";
           return <button key={inspection.id} type="button" onClick={() => select(inspection.id)} className={`focus-ring grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-lg px-3 py-2.5 text-left text-sm ${inspection.id === selected?.id ? "bg-[#e8f3f8]" : "[@media(hover:hover)]:hover:bg-paper"}`}>
-            <span className="tally-mono font-semibold text-navy">{ref}</span>
-            <span className="flex justify-end gap-1.5">{failed > 0 && <Badge variant="danger">{failed} out of range</Badge>}<Badge variant={superseded ? "outline" : STATUS_BADGE[inspection.status]}>{superseded ? "Superseded" : inspection.status}</Badge></span>
-            <span className="col-span-2 truncate text-xs text-slate-500">{inspection.lot!.customer} · {lotTitle(inspection.lot!)}</span>
+            <span className="tally-mono whitespace-nowrap font-semibold text-navy">{ref}</span>
+            <Badge variant={superseded ? "outline" : STATUS_BADGE[inspection.status]}>{superseded ? "Superseded" : inspection.status}</Badge>
+            {/* Out of range rides on the detail line, so the lot no. and status keep one line in the narrow list. */}
+            <span className="col-span-2 truncate text-xs text-slate-500">{failed > 0 && <span className="font-semibold text-danger">{failed} out of range · </span>}{inspection.lot!.customer} · {lotTitle(inspection.lot!)}</span>
           </button>;
         })}</div> : <p className="text-sm text-slate-500">No lots yet. Record one to start entering its results.</p>}
         {creating && <NewLot onCreated={(id) => { select(id); setCreating(false); }} onCancel={() => setCreating(false)} />}
@@ -155,8 +158,8 @@ export function LotView() {
         <fieldset><legend className="eyebrow">Finish checks</legend><div className="mt-2 flex flex-col divide-y divide-line rounded-lg border border-line">{check.checks.map((item) => <div key={item.key} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm"><span className="min-w-0 flex-1 font-semibold text-navy">{item.label}</span>
           {([[true, "OK", "border-success bg-success text-white"], [false, "Not OK", "border-danger bg-danger text-white"]] as const).map(([value, label, on]) => <button key={label} type="button" aria-pressed={item.value === value} disabled={!canEdit} onClick={() => saveCheck(item.key, value)} className={`press focus-ring inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold disabled:cursor-default ${item.value === value ? on : "border-line bg-white text-slate-600 [@media(hover:hover)]:hover:border-[#b8cedc]"}`}>{item.value === value && (value ? <Check className="size-3" strokeWidth={3} aria-hidden="true" /> : <X className="size-3" strokeWidth={3} aria-hidden="true" />)}{label}</button>)}
         </div>)}</div></fieldset>
-        {GROUPS.map((group) => { const rows = check.rows.filter((row) => row.group === group); return rows.length > 0 && <div key={group} className="overflow-x-auto rounded-xl border border-line"><table className="w-full min-w-[600px] table-fixed border-collapse text-sm">
-          <thead className="form-band"><tr className="text-left text-[10px] font-bold uppercase tracking-[.1em]"><th className="px-3 py-2">{group}</th><th className="w-[80px] px-3 py-2">Unit</th><th className="w-[130px] px-3 py-2 text-right">Sample limit</th><th className="w-[130px] px-3 py-2">Result</th><th className="w-[120px] px-3 py-2"><span className="sr-only">Flag</span></th></tr></thead>
+        {GROUPS.map((group) => { const rows = check.rows.filter((row) => row.group === group); return rows.length > 0 && <div key={group} className="overflow-x-auto rounded-xl border border-line"><table className="w-full table-fixed border-collapse text-sm">
+          <thead className="form-band"><tr className="text-left text-[10px] font-bold uppercase tracking-[.1em]"><th className="px-3 py-2">{group}</th><th className="w-[30%] px-3 py-2 text-right">Limit</th><th className="w-[34%] px-3 py-2">Result</th><th className="w-8 py-2 pr-3"><span className="sr-only">Check</span></th></tr></thead>
           <tbody>{rows.map((row) => <ReadingRow key={`${selected.id}-${row.key}-${row.value ?? ""}`} lot={lot} row={row} disabled={!canEdit} onSave={saveReading} />)}</tbody>
         </table></div>; })}
         <div><label className="eyebrow" htmlFor="lot-notes">Notes</label><Textarea id="lot-notes" className="mt-1.5" defaultValue={selected.notes} key={selected.id} disabled={!canEdit} onBlur={(event) => { if (event.currentTarget.value !== selected.notes) update((current) => updateInspection(current, selected.id, { notes: event.currentTarget.value })); }} placeholder="Sampling, retests, anything the reviewer should know…" /></div>
